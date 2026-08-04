@@ -1,9 +1,12 @@
-# biohub-cell-tracking-during-development
+# Cell tracking during development
 
-
+Tracking cells through 3D+time light-sheet microscopy of developing zebrafish, with
+sparse ground truth: detect cell centres in every frame, link them across time, and
+recover divisions.
 
 - Competition: https://www.kaggle.com/competitions/biohub-cell-tracking-during-development
-- Metric:
+- Metric: adjusted edge Jaccard plus 0.1 times division Jaccard, micro-averaged
+  across videos. Full definition in [`NOTES.md`](NOTES.md).
 - Deadline: 2026-09-29
 - Final placement:
 
@@ -18,10 +21,12 @@ the one or two decisions that made the difference.
 
 ## Reproducing
 
+The competition data is roughly 100 GB of OME-Zarr, so there is no single download
+line that is honest here. See [`NOTES.md`](NOTES.md) for what is held locally and
+what is read straight from the Kaggle mount.
+
 ```bash
 pip install -r requirements.txt
-python -m kaggle competitions download -c biohub-cell-tracking-during-development -p data/raw --unzip
-python -m src.train --config conf/baseline.yaml
 ```
 
 ## Experiment log
