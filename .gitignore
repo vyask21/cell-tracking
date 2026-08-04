@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .venv/
+
+# Working context for the assistant across sessions. Local only, never pushed.
+SESSION.md
