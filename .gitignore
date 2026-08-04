@@ -1,0 +1,9 @@
+# Competition data is never committed — licence terms usually forbid
+# redistribution, and it bloats the repo a reader came to read.
+data/
+artifacts/
+submissions/*.csv
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/

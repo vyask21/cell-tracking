@@ -1,0 +1,20 @@
+# The anchor baseline. Run and submit this before writing a single feature.
+# Its only job is to establish that the pipeline works end to end and to give
+# every later experiment an honest number to be compared against.
+name: baseline_mean
+target: TARGET          # set from the data description
+id_col: id
+metric: auc             # must match the competition evaluation page exactly
+seed: 42
+
+cv:
+  scheme: stratified    # kfold | stratified | group | stratified_group | time
+  n_splits: 5
+  # group_col: patient_id
+  # time_col: date
+
+model:
+  kind: mean            # mean | lightgbm
+
+features:
+  drop: []
