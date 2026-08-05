@@ -17,7 +17,23 @@ import os
 from dataclasses import dataclass
 
 import numpy as np
-import zarr
+
+# Two readers, because the two environments do not agree on what exists.
+# Locally zarr is installed and convenient. Inside the competition rerun `zarr`
+# and `numcodecs` are absent and internet is disabled, so there is no installing
+# them; `tensorstore` is present and reads Zarr v3 natively. Verified in
+# notebooks/probe_env and notebooks/probe_read. Prefer zarr when available so the
+# local path stays simple, and fall back to tensorstore, which is what actually
+# runs at submission time.
+try:
+    import zarr
+except ImportError:  # pragma: no cover - exercised on Kaggle, not locally
+    zarr = None
+
+try:
+    import tensorstore as ts
+except ImportError:
+    ts = None
 
 # Fallback physical voxel size in microns, (Z, Y, X). Prefer the per-sample value
 # parsed from the OME-NGFF metadata; this is only for files that lack it.
@@ -80,6 +96,12 @@ def read_estimated_nodes(geff_path: str) -> float | None:
 
 
 def read_geff(path: str) -> Graph:
+    """Read a ground-truth graph. Local only: the rerun has no ground truth."""
+    if zarr is None:
+        raise RuntimeError(
+            "read_geff needs zarr, which is only expected to be present locally. "
+            "Ground-truth graphs are never read inside the competition rerun."
+        )
     grp = zarr.open_group(path, mode="r")
     nodes = Nodes(
         ids=np.asarray(grp["nodes/ids"][:]),
@@ -129,11 +151,33 @@ def read_quantiles(zarr_path: str) -> dict[float, float]:
 class Image:
     """Lazy handle on one sample's image. Nothing is read until a frame is asked for."""
 
-    def __init__(self, zarr_path: str):
+    def __init__(self, zarr_path: str, backend: str | None = None):
         self.path = zarr_path
-        self._arr = zarr.open_group(zarr_path, mode="r")["0"]
         self.scale = read_scale(zarr_path)
         self.quantiles = read_quantiles(zarr_path)
+
+        if backend is None:
+            backend = "zarr" if zarr is not None else "tensorstore"
+        if backend == "zarr" and zarr is not None:
+            self.backend = "zarr"
+            self._arr = zarr.open_group(zarr_path, mode="r")["0"]
+        elif ts is not None:
+            self.backend = "tensorstore"
+            self._arr = ts.open(
+                {
+                    "driver": "zarr3",
+                    "kvstore": {
+                        "driver": "file",
+                        "path": os.path.join(zarr_path, "0"),
+                    },
+                },
+                read=True,
+            ).result()
+        else:
+            raise RuntimeError(
+                "no zarr reader available. Install zarr locally, or tensorstore, "
+                "which is what the competition rerun environment provides."
+            )
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -145,6 +189,8 @@ class Image:
 
     def frame(self, t: int) -> np.ndarray:
         """One timepoint, `(Z, Y, X)`. This is exactly one stored chunk."""
+        if self.backend == "tensorstore":
+            return np.asarray(self._arr[t].read().result())
         return np.asarray(self._arr[t])
 
     def normalised_frame(
