@@ -1,1 +1,2 @@
 id,utc,git_sha,name,config,config_hash,cv_mean,cv_std,folds,cv_detail,cv_ci,lb_public,lb_private,submitted,notes
+1,2026-08-05 22:19,a549ca6,baseline_localmax,conf\baseline.yaml,4f8a3af0,0.640674,0.068630,2,"44b6=0.5720,6bba=0.7093","44b6=[0.5061,0.6325];6bba=[0.6714,0.7453]",,,no,"anchor baseline, otsu local-max detection, assignment linking, no divisions; independently reproduced bit-for-bit by a second full run"
