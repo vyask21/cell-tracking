@@ -1,0 +1,39 @@
+# The anchor baseline. No learned parameters: smooth, take local maxima, link by
+# optimal assignment on physical distance. Its only job is to prove the pipeline
+# runs end to end and to give every later experiment an honest number to beat.
+#
+# The detection settings deliberately err toward over-detection. A predicted node
+# that matches nothing costs nothing on the edge term, and surplus nodes are
+# charged only through 1 - 0.1 * (N_pred - N_true) / N_true, so doubling the node
+# count costs 10% while missing a real cell costs edge recall outright.
+name: detect_thr030
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out   # leave_one_embryo_out | within_embryo_kfold
+  # n_splits only applies to within_embryo_kfold, which is a screening split and
+  # does not mirror the embryo-disjoint test set.
+
+detect:
+  # All spatial settings are in microns. Voxels are anisotropic, 1.625 in Z
+  # against 0.40625 in Y and X, and the metric matches in physical space.
+  sigma_um: 2.0
+  min_sep_um: 3.0
+  # Multiplies the per-frame Otsu threshold. Below 1.0 accepts dimmer peaks.
+  # A fixed absolute threshold was measured returning 0.05x to 1.46x the true
+  # cell count across samples, so the threshold is derived per frame instead.
+  threshold_scale: 0.30
+  max_detections: 20000
+
+link:
+  # The scorer matches nodes under a 7 um cap, so linking further than that can
+  # never produce a true positive edge.
+  max_link_um: 7.0
+  # 0 disables division prediction. Only 151 divisions are annotated across all
+  # 199 samples and 112 samples have none, so spurious forks can easily cost more
+  # than the 0.1-weighted division term is worth. Turn this on as its own
+  # experiment, not as part of another change.
+  max_division_um: 0.0
+
+# One variable against conf/baseline.yaml: threshold_scale = 0.30.
+# accept dimmer peaks, pushing toward over-detection
