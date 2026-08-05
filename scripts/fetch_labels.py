@@ -43,6 +43,10 @@ def main() -> int:
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--max-retries", type=int, default=6)
+    # Kaggle rate limits per-file downloads hard: six workers with no delay got
+    # roughly 500 files before every request started returning 429. Throttling is
+    # not optional here, it is the difference between finishing and stalling.
+    ap.add_argument("--delay", type=float, default=0.0, help="seconds between requests")
     ap.add_argument("--limit", type=int, default=0, help="stop after N files, for a smoke test")
     args = ap.parse_args()
 
@@ -95,8 +99,10 @@ def main() -> int:
                 time.sleep(min(60.0, 2.0 * (2**attempt)))
         with lock:
             done += 1
-            if done % 200 == 0:
+            if done % 100 == 0:
                 print(f"  {done}/{len(todo)}", flush=True)
+        if args.delay:
+            time.sleep(args.delay)
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(fetch, n): n for n in todo}
