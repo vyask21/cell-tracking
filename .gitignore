@@ -10,3 +10,6 @@ __pycache__/
 
 # Working context for the assistant across sessions. Local only, never pushed.
 SESSION.md
+
+# Cloned reference code from the organisers, not ours to redistribute.
+external/
