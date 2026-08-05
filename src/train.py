@@ -1,127 +1,118 @@
-"""Train one config across the CV folds, write OOF predictions and a submission,
-and append one row to the experiment ledger.
+"""Run one config across the leave-one-embryo-out folds and log it.
 
     python -m src.train --config conf/baseline.yaml
 
-Deliberately boring. The point is that every number in experiments.csv came from
-this one path, so two rows are actually comparable.
+The name is inherited from the template. The classical baseline fits nothing, so
+this is an evaluation loop rather than a training loop, but the interface stays
+because a learned detector will slot into the same place and every row in
+experiments.csv has to have come from the same path to be comparable.
+
+Two folds, and they are reported separately. Holding out `44b6` trains on dense
+annotation and validates on sparse; holding out `6bba` does the reverse on far less
+data. Averaging them hides the only thing the split measures. A change is believed
+when both folds move the same way, and is inconclusive otherwise.
 """
 
 from __future__ import annotations
 
 import argparse
+import time
 
 import numpy as np
-import pandas as pd
 
 from src import cv as cv_mod
-from src import data as data_mod
 from src import ledger, metrics
 from src.config import load_config
+from src.data import DEFAULT_SCALE_ZYX, read_scale
+from src.pipeline import predict_sample
 
 
-def fit_predict_fold(X_tr, y_tr, X_va, y_va, X_te, cfg):
-    """Fit one fold, return (validation preds, test preds).
+def evaluate_fold(fold, cfg, limit_samples: int = 0, verbose: bool = True):
+    """Predict and score every validation sample in one fold."""
+    samples = list(fold.valid)
+    if limit_samples:
+        # Deterministic subsample for quick iteration. Marked in the ledger notes,
+        # because a score over 10 samples is not comparable to one over 128.
+        rng = np.random.default_rng(cfg.seed)
+        idx = rng.permutation(len(samples))[:limit_samples]
+        samples = [samples[i] for i in sorted(idx)]
 
-    y_va is used only for early stopping. That makes the CV score very slightly
-    optimistic, which is the standard trade and fine as long as every config in
-    the ledger pays the same cost. If a competition is tight enough for that to
-    matter, switch to a fixed n_estimators and drop early stopping entirely.
-
-    Swap the model here and leave the fold loop, OOF handling and ledger alone.
-    """
-    kind = cfg.model.get("kind", "lightgbm")
-    task = cfg.model.get("task", "binary")  # binary | regression
-
-    if kind == "mean":
-        # The anchor baseline. Submit this first, before any modelling, so every
-        # later number has something honest to be compared against.
-        const = float(np.mean(y_tr))
-        return np.full(len(X_va), const), np.full(len(X_te), const)
-
-    if kind == "lightgbm":
-        import lightgbm as lgb
-
-        params = dict(cfg.model.get("params", {}))
-        params.setdefault("random_state", cfg.seed)
-        params.setdefault("verbose", -1)
-        rounds = int(cfg.model.get("num_boost_round", 2000))
-        early = int(cfg.model.get("early_stopping_rounds", 100))
-
-        Est = lgb.LGBMRegressor if task == "regression" else lgb.LGBMClassifier
-        model = Est(n_estimators=rounds, **params)
-        # LightGBM 4.7 renamed eval_set to eval_X/eval_y. Kaggle notebooks often
-        # run an older build than this machine, so pick whichever fit() accepts
-        # rather than pinning a version the remote environment may not have.
-        import inspect
-
-        sig = inspect.signature(model.fit).parameters
-        eval_kw = (
-            {"eval_X": X_va, "eval_y": y_va}
-            if "eval_X" in sig
-            else {"eval_set": [(X_va, y_va)]}
-        )
-        model.fit(
-            X_tr,
-            y_tr,
-            callbacks=[lgb.early_stopping(early, verbose=False)],
-            **eval_kw,
-        )
-        if task == "regression":
-            return model.predict(X_va), model.predict(X_te)
-        return model.predict_proba(X_va)[:, 1], model.predict_proba(X_te)[:, 1]
-
-    raise ValueError(f"unknown model kind {kind!r}")
+    scores = []
+    t0 = time.time()
+    for i, sample in enumerate(samples, 1):
+        zarr_path = str(cfg.train_dir / f"{sample}.zarr")
+        gt_geff = str(cfg.train_dir / f"{sample}.geff")
+        graph, stats = predict_sample(zarr_path, cfg)
+        scale = read_scale(zarr_path) or DEFAULT_SCALE_ZYX
+        s = metrics.score_prediction(graph, gt_geff, sample=sample, scale=scale)
+        scores.append(s)
+        if verbose:
+            print(
+                f"    [{i}/{len(samples)}] {sample}: "
+                f"adj_J={s.adj_edge_jaccard:.4f} J={s.edge_jaccard:.4f} "
+                f"recall={s.node_recall:.3f} "
+                f"nodes={s.num_pred_nodes} ratio={s.total_node_ratio:+.2f} "
+                f"div={s.division_tp}/{s.division_fp}/{s.division_fn} "
+                f"[{stats['detect_s'] + stats['link_s']:.1f}s]",
+                flush=True,
+            )
+    if verbose:
+        print(f"    fold {fold.index} took {(time.time() - t0) / 60:.1f} min")
+    return scores
 
 
-def run(config_path: str, notes: str = "") -> int:
+def run(config_path: str, notes: str = "", limit_samples: int = 0) -> int:
     cfg = load_config(config_path)
-    train, test, sample = data_mod.load_raw(cfg)
-    train, test, features = data_mod.build_features(train, test, cfg)
-
-    folds = cv_mod.make_folds(train, cfg)
-    print(cv_mod.describe(folds, train, cfg))
-
-    y = train[cfg.target].values
-    oof = np.zeros(len(train), dtype=float)
-    test_pred = np.zeros(len(test), dtype=float)
-    n_folds = int(folds.max()) + 1
-    fold_scores = []
-
-    for f in range(n_folds):
-        tr, va = folds != f, folds == f
-        p_va, p_te = fit_predict_fold(
-            train.loc[tr, features],
-            y[tr],
-            train.loc[va, features],
-            y[va],
-            test[features],
-            cfg,
+    samples = cv_mod.list_samples(str(cfg.train_dir))
+    if not samples:
+        raise SystemExit(
+            f"no samples with ground truth under {cfg.train_dir}. "
+            "Run scripts/download_data.py first."
         )
-        oof[va] = p_va
-        test_pred += p_te / n_folds
-        s = metrics.score(cfg.metric, y[va], p_va)
-        fold_scores.append(s)
-        print(f"  fold {f}: {cfg.metric}={s:.6f}")
 
-    cv_mean = float(np.mean(fold_scores))
-    cv_std = float(np.std(fold_scores))
-    # The pooled OOF score and the mean-of-folds disagree when folds are uneven
-    # or the metric is not decomposable (AUC is not). Report both; compare like
-    # with like across experiments.
-    pooled = metrics.score(cfg.metric, y, oof)
-    print(f"\nCV {cfg.metric}: {cv_mean:.6f} +/- {cv_std:.6f}   (pooled OOF: {pooled:.6f})")
-    if cv_std > 0 and cv_std * 0.5 > abs(cv_mean) * 0.02:
-        print("note: fold spread is wide relative to the mean. Small gains here are noise")
+    folds = cv_mod.make_folds(samples, cfg)
+    cv_mod.check_no_embryo_leak(folds)
+    print(cv_mod.describe(folds))
+    print()
 
-    tag = f"{cfg.name}_{cfg.hash()}"
-    np.save(cfg.oof_dir / f"{tag}.npy", oof)
+    fold_summaries = []
+    for fold in folds:
+        print(f"  fold {fold.index}: holding out {fold.held_out_embryo}")
+        scores = evaluate_fold(fold, cfg, limit_samples=limit_samples)
+        summary = metrics.score_with_interval(scores, seed=cfg.seed)
+        summary["held_out"] = fold.held_out_embryo
+        summary["n_samples"] = len(scores)
+        fold_summaries.append(summary)
+        print(
+            f"  fold {fold.index} ({fold.held_out_embryo}): score={summary['score']:.4f} "
+            f"adj_edge_J={summary['adj_edge_jaccard']:.4f} "
+            f"[{summary['adj_edge_jaccard_lo']:.4f}, {summary['adj_edge_jaccard_hi']:.4f}] "
+            f"div_J={summary['division_jaccard']:.4f} "
+            f"node_recall={summary['node_recall']:.4f}\n"
+        )
 
-    sub = sample.copy() if len(sample) else pd.DataFrame({cfg.id_col: test[cfg.id_col]})
-    sub_target = cfg.raw.get("submission_col", cfg.target)
-    sub[sub_target] = test_pred
-    sub_path = cfg.sub_dir / f"{tag}.csv"
-    sub.to_csv(sub_path, index=False)
+    fold_scores = [s["score"] for s in fold_summaries]
+    cv_mean = float(np.nanmean(fold_scores))
+    cv_std = float(np.nanstd(fold_scores))
+    detail = ",".join(f"{s['held_out']}={s['score']:.4f}" for s in fold_summaries)
+    ci = ";".join(
+        f"{s['held_out']}=[{s['adj_edge_jaccard_lo']:.4f},{s['adj_edge_jaccard_hi']:.4f}]"
+        for s in fold_summaries
+    )
+
+    print("=" * 72)
+    print(f"per fold : {detail}")
+    print(f"mean     : {cv_mean:.4f} +/- {cv_std:.4f}")
+    print(f"bootstrap: {ci}")
+    spread = abs(fold_scores[0] - fold_scores[-1]) if len(fold_scores) > 1 else 0.0
+    if spread > 0.05:
+        print(
+            f"note: the two folds differ by {spread:.4f}. That is the embryo transfer\n"
+            "      gap, not noise. Read them separately before believing the mean."
+        )
+
+    if limit_samples:
+        notes = (notes + f" [limited to {limit_samples} samples/fold]").strip()
 
     exp_id = ledger.append(
         name=cfg.name,
@@ -129,12 +120,13 @@ def run(config_path: str, notes: str = "") -> int:
         config_hash=cfg.hash(),
         cv_mean=cv_mean,
         cv_std=cv_std,
-        folds=n_folds,
+        folds=len(folds),
+        cv_detail=detail,
+        cv_ci=ci,
         notes=notes,
     )
     print(f"\nlogged as experiment {exp_id}")
-    print(f"submission: {sub_path}")
-    print(f"submit with: python -m src.submit --id {exp_id} --file {sub_path.name}")
+    print(f"predict test with: python -m src.predict --config {config_path} --id {exp_id}")
     return exp_id
 
 
@@ -142,5 +134,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--notes", default="")
+    ap.add_argument(
+        "--limit-samples",
+        type=int,
+        default=0,
+        help="score only N samples per fold, for quick iteration",
+    )
     a = ap.parse_args()
-    run(a.config, a.notes)
+    run(a.config, a.notes, a.limit_samples)

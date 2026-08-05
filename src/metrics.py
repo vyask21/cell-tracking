@@ -85,6 +85,71 @@ def load_graph(geff_path: str | os.PathLike):
     return result[0] if isinstance(result, tuple) else result
 
 
+def to_tracksdata(graph):
+    """Convert a `src.data.Graph` into a tracksdata graph, in memory.
+
+    Avoids a write-to-geff-and-read-back round trip on every scored sample. The
+    node ids are preserved so predicted edges keep referring to the right nodes.
+    """
+    _ensure_reference_on_path()
+    import tracksdata as td
+
+    K = td.DEFAULT_ATTR_KEYS
+    g = td.graph.IndexedRXGraph()
+    # `t` is registered by default; z, y and x are not. Adding an existing key
+    # raises, so only register what is missing.
+    import polars as pl
+
+    existing = set(g.node_attr_keys())
+    for key in (K.Z, K.Y, K.X):
+        if key not in existing:
+            g.add_node_attr_key(key, pl.Float64, 0.0)
+    if K.EDGE_DIST not in set(g.edge_attr_keys()):
+        g.add_edge_attr_key(K.EDGE_DIST, pl.Float64, 0.0)
+
+    n = graph.nodes
+    g.bulk_add_nodes(
+        [
+            {K.T: int(t), K.Z: float(z), K.Y: float(y), K.X: float(x)}
+            for t, z, y, x in zip(n.t, n.z, n.y, n.x)
+        ],
+        indices=[int(i) for i in n.ids],
+    )
+    if graph.edges.size:
+        g.bulk_add_edges(
+            [
+                {K.EDGE_SOURCE: int(s), K.EDGE_TARGET: int(t), K.EDGE_DIST: 0.0}
+                for s, t in graph.edges
+            ]
+        )
+    return g
+
+
+def score_prediction(
+    pred_graph,
+    gt_geff: str | os.PathLike,
+    sample: str,
+    scale: tuple[float, float, float] = DEFAULT_SCALE_ZYX,
+    max_distance: float = MAX_MATCH_DISTANCE_UM,
+) -> SampleScore:
+    """Score an in-memory `src.data.Graph` against a ground-truth geff."""
+    _ensure_reference_on_path()
+    from tracking_cellmot.metrics import evaluate, node_recall, per_sample_metrics
+
+    from src.data import read_estimated_nodes
+
+    pred = to_tracksdata(pred_graph)
+    gt = load_graph(gt_geff)
+
+    er = evaluate(pred, gt, scale=scale, max_distance=max_distance)
+    recall = (
+        node_recall(pred, gt) if pred.num_edges() > 0 and pred.num_nodes() > 0 else 0.0
+    )
+    n_total = read_estimated_nodes(str(gt_geff))
+    row = per_sample_metrics(er, float("nan") if n_total is None else n_total, recall)
+    return SampleScore(sample=sample, **row)
+
+
 def score_sample(
     pred_geff: str | os.PathLike,
     gt_geff: str | os.PathLike,
