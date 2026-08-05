@@ -16,15 +16,59 @@ when both folds move the same way, and is inconclusive otherwise.
 from __future__ import annotations
 
 import argparse
+import csv
+import os
 import time
 
 import numpy as np
 
 from src import cv as cv_mod
 from src import ledger, metrics
-from src.config import load_config
+from src.config import REPO_ROOT, load_config
 from src.data import DEFAULT_SCALE_ZYX, read_scale
 from src.pipeline import predict_sample
+
+# Scoring all 199 samples takes hours, so per-sample results are cached on disk
+# and a rerun resumes rather than starting over. The cache is keyed by the config
+# hash, so changing any setting invalidates it automatically and there is no way
+# to silently mix results from two different configs.
+CACHE_FIELDS = [
+    "sample", "edge_tp", "edge_fp", "edge_fn",
+    "division_tp", "division_fp", "division_fn",
+    "num_pred_nodes", "node_recall", "total_node_ratio",
+    "edge_jaccard", "adj_edge_jaccard",
+]
+
+
+def cache_path(cfg) -> str:
+    d = REPO_ROOT / "artifacts" / "scores"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / f"{cfg.name}_{cfg.hash()}.csv")
+
+
+def load_cache(path: str) -> dict[str, metrics.SampleScore]:
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            kwargs = {
+                k: (row[k] if k == "sample" else float(row[k])) for k in CACHE_FIELDS
+            }
+            for k in ("edge_tp", "edge_fp", "edge_fn", "division_tp",
+                      "division_fp", "division_fn", "num_pred_nodes"):
+                kwargs[k] = int(kwargs[k])
+            out[row["sample"]] = metrics.SampleScore(**kwargs)
+    return out
+
+
+def append_cache(path: str, score: metrics.SampleScore) -> None:
+    exists = os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=CACHE_FIELDS)
+        if not exists:
+            w.writeheader()
+        w.writerow({k: getattr(score, k) for k in CACHE_FIELDS})
 
 
 def evaluate_fold(fold, cfg, limit_samples: int = 0, verbose: bool = True):
@@ -37,23 +81,40 @@ def evaluate_fold(fold, cfg, limit_samples: int = 0, verbose: bool = True):
         idx = rng.permutation(len(samples))[:limit_samples]
         samples = [samples[i] for i in sorted(idx)]
 
+    cache = load_cache(cache_path(cfg))
     scores = []
     t0 = time.time()
+    n_new = 0
     for i, sample in enumerate(samples, 1):
+        if sample in cache:
+            s = cache[sample]
+            scores.append(s)
+            if verbose:
+                print(
+                    f"    [{i}/{len(samples)}] {sample}: adj_J={s.adj_edge_jaccard:.4f} "
+                    "(cached)",
+                    flush=True,
+                )
+            continue
+
         zarr_path = str(cfg.train_dir / f"{sample}.zarr")
         gt_geff = str(cfg.train_dir / f"{sample}.geff")
         graph, stats = predict_sample(zarr_path, cfg)
         scale = read_scale(zarr_path) or DEFAULT_SCALE_ZYX
         s = metrics.score_prediction(graph, gt_geff, sample=sample, scale=scale)
         scores.append(s)
+        append_cache(cache_path(cfg), s)
+        n_new += 1
         if verbose:
+            done_left = len(samples) - i
+            eta = (time.time() - t0) / max(n_new, 1) * done_left / 60
             print(
                 f"    [{i}/{len(samples)}] {sample}: "
                 f"adj_J={s.adj_edge_jaccard:.4f} J={s.edge_jaccard:.4f} "
                 f"recall={s.node_recall:.3f} "
                 f"nodes={s.num_pred_nodes} ratio={s.total_node_ratio:+.2f} "
                 f"div={s.division_tp}/{s.division_fp}/{s.division_fn} "
-                f"[{stats['detect_s'] + stats['link_s']:.1f}s]",
+                f"[{stats['detect_s'] + stats['link_s']:.1f}s, eta {eta:.0f} min]",
                 flush=True,
             )
     if verbose:
