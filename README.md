@@ -5,8 +5,11 @@ sparse ground truth: detect cell centres in every frame, link them across time, 
 recover divisions.
 
 - Competition: https://www.kaggle.com/competitions/biohub-cell-tracking-during-development
-- Metric: adjusted edge Jaccard plus 0.1 times division Jaccard, micro-averaged
-  across videos. Full definition in [`NOTES.md`](NOTES.md).
+- Metric: adjusted edge Jaccard plus 0.1 times division Jaccard. Full definition in
+  [`NOTES.md`](NOTES.md).
+- Code competition. The scored test set is hidden, embryo-disjoint from train, and
+  swapped in at rerun time, so inference has to run over roughly 85 GB inside a 12 h
+  notebook with no internet access.
 - Deadline: 2026-09-29
 - Final placement:
 
