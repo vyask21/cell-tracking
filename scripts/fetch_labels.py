@@ -14,6 +14,7 @@ import csv
 import os
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 DEFAULT_LISTING = os.path.join("data", "meta", "file_listing.csv")
@@ -40,7 +41,8 @@ def main() -> int:
     ap.add_argument("--slug", default="biohub-cell-tracking-during-development")
     ap.add_argument("--listing", default=DEFAULT_LISTING)
     ap.add_argument("--out", default=DEFAULT_OUT)
-    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--max-retries", type=int, default=6)
     ap.add_argument("--limit", type=int, default=0, help="stop after N files, for a smoke test")
     args = ap.parse_args()
 
@@ -79,7 +81,18 @@ def main() -> int:
         nonlocal done
         dest = os.path.join(args.out, os.path.dirname(name))
         os.makedirs(dest, exist_ok=True)
-        client().competition_download_file(args.slug, name, path=dest, force=False, quiet=True)
+        # Kaggle rate limits hard at this file count, so back off rather than
+        # dropping the file. A dropped geff would silently shrink the dataset.
+        for attempt in range(args.max_retries):
+            try:
+                client().competition_download_file(
+                    args.slug, name, path=dest, force=False, quiet=True
+                )
+                break
+            except Exception:
+                if attempt == args.max_retries - 1:
+                    raise
+                time.sleep(min(60.0, 2.0 * (2**attempt)))
         with lock:
             done += 1
             if done % 200 == 0:
