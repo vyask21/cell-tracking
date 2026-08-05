@@ -1,0 +1,17 @@
+{
+  "id": "vyask21/cell-tracking-profile",
+  "title": "cell-tracking-profile",
+  "code_file": "profile_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "competition_sources": [
+    "biohub-cell-tracking-during-development"
+  ],
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

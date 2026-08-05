@@ -1,49 +1,156 @@
-"""Competition metrics.
+"""Scoring, through the organisers' own code.
 
-The metric drives the loss, the CV scheme, and whether predictions need
-calibrating. Read the evaluation page and set `metric:` in the config to match
-exactly. Optimizing a proxy is a silent, expensive error.
+The competition score is
+
+    adjusted_edge_jaccard + 0.1 * division_jaccard
+
+and it is not reimplemented here. `tracking_cellmot.metrics.evaluate` is called
+directly, on graphs loaded the same way the organisers load them. A rewrite would
+disagree with the leaderboard in ways that are hard to see and expensive to find,
+and a local number that does not track the leaderboard is worse than no number.
+
+Run `python scripts/get_reference_code.py` once to put their repo at the pinned
+commit under `external/`. That code is BSD-3-Clause and stays theirs.
+
+Two things about the metric are worth keeping in mind whenever a number from here
+is interpreted, both established by reading their source:
+
+- A predicted edge only counts as a false positive when one of its endpoints
+  matched an annotated ground-truth node. Predictions in unannotated regions are
+  invisible to the edge term and cost only through the node-count penalty.
+- The adjusted edge Jaccard is weight-averaged across samples by that sample's
+  `TP + FP + FN`, while the division Jaccard is micro-averaged over pooled counts.
+  So a single heavily annotated sample can move the edge term a long way.
 """
 
 from __future__ import annotations
 
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
 import numpy as np
-from sklearn import metrics as skm
 
-# Whether a higher score is better. Used to sort the ledger and to decide the
-# direction of early stopping.
-DIRECTION = {
-    "auc": "max",
-    "accuracy": "max",
-    "f1": "max",
-    "logloss": "min",
-    "rmse": "min",
-    "mae": "min",
-    "rmsle": "min",
-}
+REPO_ROOT = Path(__file__).resolve().parents[1]
+REFERENCE_DIR = REPO_ROOT / "external" / "kaggle-cell-tracking-competition"
+
+# Physical voxel size in microns, (Z, Y, X). Matching is capped at 7 um in
+# physical space, which is about 4.3 voxels in Z and 17 in Y/X. A distance
+# computed in voxels is wrong by a factor of four between the axes.
+DEFAULT_SCALE_ZYX: tuple[float, float, float] = (1.625, 0.40625, 0.40625)
+MAX_MATCH_DISTANCE_UM = 7.0
 
 
-def score(name: str, y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    if name == "auc":
-        return skm.roc_auc_score(y_true, y_pred)
-    if name == "logloss":
-        return skm.log_loss(y_true, y_pred)
-    if name == "accuracy":
-        return skm.accuracy_score(y_true, (y_pred > 0.5).astype(int))
-    if name == "f1":
-        return skm.f1_score(y_true, (y_pred > 0.5).astype(int))
-    if name == "rmse":
-        return float(np.sqrt(skm.mean_squared_error(y_true, y_pred)))
-    if name == "mae":
-        return skm.mean_absolute_error(y_true, y_pred)
-    if name == "rmsle":
-        return float(
-            np.sqrt(skm.mean_squared_error(np.log1p(y_true), np.log1p(np.maximum(y_pred, 0))))
+def _ensure_reference_on_path() -> None:
+    src = REFERENCE_DIR / "src"
+    if not src.exists():
+        raise RuntimeError(
+            "reference code missing. Run:  python scripts/get_reference_code.py\n"
+            f"expected it at {src}"
         )
-    raise ValueError(f"unknown metric {name!r}. Add it here rather than approximating")
+    if str(src) not in sys.path:
+        sys.path.insert(0, str(src))
 
 
-def is_higher_better(name: str) -> bool:
-    if name not in DIRECTION:
-        raise ValueError(f"unknown metric {name!r}")
-    return DIRECTION[name] == "max"
+@dataclass
+class SampleScore:
+    """One sample's counts and derived metrics, as the organisers compute them."""
+
+    sample: str
+    edge_tp: int
+    edge_fp: int
+    edge_fn: int
+    division_tp: int
+    division_fp: int
+    division_fn: int
+    num_pred_nodes: int
+    node_recall: float
+    total_node_ratio: float
+    edge_jaccard: float
+    adj_edge_jaccard: float
+
+    @property
+    def weight(self) -> int:
+        """The weight this sample carries in the aggregate edge score."""
+        return self.edge_tp + self.edge_fp + self.edge_fn
+
+
+def load_graph(geff_path: str | os.PathLike):
+    """Load a .geff into a tracksdata graph, exactly as the organisers do."""
+    _ensure_reference_on_path()
+    import tracksdata as td
+
+    result = td.graph.IndexedRXGraph.from_geff(Path(geff_path))
+    return result[0] if isinstance(result, tuple) else result
+
+
+def score_sample(
+    pred_geff: str | os.PathLike,
+    gt_geff: str | os.PathLike,
+    sample: str,
+    scale: tuple[float, float, float] = DEFAULT_SCALE_ZYX,
+    max_distance: float = MAX_MATCH_DISTANCE_UM,
+) -> SampleScore:
+    _ensure_reference_on_path()
+    from tracking_cellmot.metrics import evaluate, node_recall, per_sample_metrics
+
+    from src.data import read_estimated_nodes
+
+    pred = load_graph(pred_geff)
+    gt = load_graph(gt_geff)
+
+    er = evaluate(pred, gt, scale=scale, max_distance=max_distance)
+    recall = (
+        node_recall(pred, gt)
+        if pred.num_edges() > 0 and pred.num_nodes() > 0
+        else 0.0
+    )
+    # The over-detection penalty uses the organisers' node-count estimate, never a
+    # count derived from the sparse ground truth.
+    n_total = read_estimated_nodes(str(gt_geff))
+    row = per_sample_metrics(er, float("nan") if n_total is None else n_total, recall)
+    return SampleScore(sample=sample, **row)
+
+
+def aggregate(scores: list[SampleScore]) -> dict:
+    """Run-level summary, using the organisers' `summarise`."""
+    _ensure_reference_on_path()
+    from tracking_cellmot.metrics import summarise
+
+    rows = [
+        {
+            "edge_tp": s.edge_tp, "edge_fp": s.edge_fp, "edge_fn": s.edge_fn,
+            "division_tp": s.division_tp,
+            "division_fp": s.division_fp,
+            "division_fn": s.division_fn,
+            "num_pred_nodes": s.num_pred_nodes,
+            "node_recall": s.node_recall,
+            "total_node_ratio": s.total_node_ratio,
+            "edge_jaccard": s.edge_jaccard,
+            "adj_edge_jaccard": s.adj_edge_jaccard,
+        }
+        for s in scores
+    ]
+    return summarise(rows)
+
+
+def score_with_interval(scores: list[SampleScore], seed: int = 0) -> dict:
+    """Aggregate, plus a bootstrap interval on the adjusted edge Jaccard.
+
+    Two embryos means leave-one-embryo-out has two folds, so the fold-to-fold
+    spread is a two-point estimate and close to useless on its own. Resampling
+    whole samples inside a fold gives an honest interval on that fold's number,
+    which is the difference between "this change helped" and "this change moved
+    the number by less than the noise".
+    """
+    from src.cv import bootstrap_weighted_mean
+
+    out = dict(aggregate(scores))
+    values = np.array([s.adj_edge_jaccard for s in scores], dtype=float)
+    weights = np.array([s.weight for s in scores], dtype=float)
+    point, lo, hi = bootstrap_weighted_mean(values, weights, seed=seed)
+    out["adj_edge_jaccard_boot"] = point
+    out["adj_edge_jaccard_lo"] = lo
+    out["adj_edge_jaccard_hi"] = hi
+    return out
