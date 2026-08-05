@@ -1,49 +1,210 @@
-"""Data loading and the feature hook.
+"""Reading the images and the ground-truth graphs, and writing a submission.
 
-Feature engineering that uses the target (target encoding, out-of-fold counts,
-anything aggregating y) does NOT belong here. It belongs inside the fold loop
-in train.py, fit on the training fold only. Putting it here is the most common
-way a competition CV silently becomes fiction.
+Deliberately narrow dependencies. The rerun notebook has no internet and a 12 h
+budget over roughly 200 unseen samples, so the inference path uses zarr and numpy
+and nothing else. `tracksdata`, `geff` and `polars` are needed only for *scoring*,
+which happens locally and never inside the submitted notebook.
+
+Images are `(T, Z, Y, X)` uint16 with one chunk per timepoint, so a timepoint is
+the natural unit of work and nothing ever needs the whole 400 MB array resident.
 """
 
 from __future__ import annotations
 
-import pandas as pd
+import csv
+import json
+import os
+from dataclasses import dataclass
+
+import numpy as np
+import zarr
+
+# Fallback physical voxel size in microns, (Z, Y, X). Prefer the per-sample value
+# parsed from the OME-NGFF metadata; this is only for files that lack it.
+DEFAULT_SCALE_ZYX: tuple[float, float, float] = (1.625, 0.40625, 0.40625)
+
+SUBMISSION_COLUMNS = (
+    "id", "dataset", "row_type", "node_id", "t", "z", "y", "x", "source_id", "target_id",
+)
 
 
-def load_raw(cfg) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    d = cfg.data_dir
-    train = pd.read_csv(d / "train.csv")
-    test = pd.read_csv(d / "test.csv")
-    sub_path = d / "sample_submission.csv"
-    sample = pd.read_csv(sub_path) if sub_path.exists() else pd.DataFrame()
-    return train, test, sample
+@dataclass
+class Nodes:
+    """Ground-truth or predicted detections, as flat arrays.
 
-
-def build_features(
-    train: pd.DataFrame, test: pd.DataFrame, cfg
-) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
-    """Target-independent feature engineering only.
-
-    Safe to fit on train+test together because nothing here touches y.
-    Returns (train, test, feature_columns).
+    `ids` are the graph's node ids and are not necessarily contiguous, so anything
+    indexing by position has to map through them rather than assume `ids[i] == i`.
     """
-    drop = {cfg.target, cfg.id_col} | set(cfg.features.get("drop", []))
 
-    for df in (train, test):
-        for col in df.select_dtypes(include=["object", "category"]).columns:
-            if col not in drop:
-                df[col] = df[col].astype("category")
+    ids: np.ndarray
+    t: np.ndarray
+    z: np.ndarray
+    y: np.ndarray
+    x: np.ndarray
 
-    # Categories must be aligned across train and test or LightGBM sees different
-    # codes for the same string and the test predictions quietly go wrong.
-    for col in train.columns:
-        if col in drop or col not in test.columns:
-            continue
-        if str(train[col].dtype) == "category":
-            cats = train[col].cat.categories.union(test[col].cat.categories)
-            train[col] = train[col].cat.set_categories(cats)
-            test[col] = test[col].cat.set_categories(cats)
+    def __len__(self) -> int:
+        return int(self.ids.size)
 
-    features = [c for c in train.columns if c not in drop]
-    return train, test, features
+    def zyx(self) -> np.ndarray:
+        return np.stack([self.z, self.y, self.x], axis=1).astype(np.float64)
+
+
+@dataclass
+class Graph:
+    nodes: Nodes
+    edges: np.ndarray  # (N, 2) of (source_id, target_id)
+    estimated_number_of_nodes: float | None = None
+
+    def divisions(self) -> np.ndarray:
+        """Node ids with two or more outgoing edges."""
+        if self.edges.size == 0:
+            return np.empty(0, dtype=np.int64)
+        src, counts = np.unique(self.edges[:, 0], return_counts=True)
+        return src[counts >= 2]
+
+
+def read_estimated_nodes(geff_path: str) -> float | None:
+    """`extra.estimated_number_of_nodes` from the geff metadata.
+
+    This drives the over-detection penalty and is an organiser-supplied count of
+    *all* true cells, far larger than the sparse annotation. Never recompute it
+    from the ground-truth graph.
+    """
+    meta_path = os.path.join(geff_path, "zarr.json")
+    if not os.path.exists(meta_path):
+        return None
+    with open(meta_path, encoding="utf-8") as fh:
+        geff = json.load(fh)["attributes"]["geff"]
+    val = (geff.get("extra") or {}).get("estimated_number_of_nodes")
+    return float(val) if val is not None else None
+
+
+def read_geff(path: str) -> Graph:
+    grp = zarr.open_group(path, mode="r")
+    nodes = Nodes(
+        ids=np.asarray(grp["nodes/ids"][:]),
+        t=np.asarray(grp["nodes/props/t/values"][:]),
+        z=np.asarray(grp["nodes/props/z/values"][:]),
+        y=np.asarray(grp["nodes/props/y/values"][:]),
+        x=np.asarray(grp["nodes/props/x/values"][:]),
+    )
+    edges = np.asarray(grp["edges/ids"][:])
+    if edges.size == 0:
+        edges = np.empty((0, 2), dtype=np.int64)
+    return Graph(
+        nodes=nodes, edges=edges, estimated_number_of_nodes=read_estimated_nodes(path)
+    )
+
+
+def read_scale(zarr_path: str) -> tuple[float, float, float]:
+    """Per-sample (Z, Y, X) micron scale from the OME-NGFF metadata."""
+    meta_path = os.path.join(zarr_path, "zarr.json")
+    if not os.path.exists(meta_path):
+        return DEFAULT_SCALE_ZYX
+    with open(meta_path, encoding="utf-8") as fh:
+        attrs = json.load(fh).get("attributes", {})
+    ms = attrs.get("multiscales")
+    if not ms:
+        return DEFAULT_SCALE_ZYX
+    tf = ms[0]["datasets"][0]["coordinateTransformations"][0]
+    if tf.get("type") != "scale":
+        return DEFAULT_SCALE_ZYX
+    return tuple(float(v) for v in tf["scale"][-3:])  # type: ignore[return-value]
+
+
+def read_quantiles(zarr_path: str) -> dict[float, float]:
+    """Precomputed intensity quantiles shipped in the zarr attrs.
+
+    Present for every sample, so normalisation needs no pass over the pixels.
+    """
+    meta_path = os.path.join(zarr_path, "zarr.json")
+    if not os.path.exists(meta_path):
+        return {}
+    with open(meta_path, encoding="utf-8") as fh:
+        attrs = json.load(fh).get("attributes", {})
+    q = (attrs.get("image_statistics") or {}).get("quantiles") or {}
+    return {float(k): float(v) for k, v in q.items()}
+
+
+class Image:
+    """Lazy handle on one sample's image. Nothing is read until a frame is asked for."""
+
+    def __init__(self, zarr_path: str):
+        self.path = zarr_path
+        self._arr = zarr.open_group(zarr_path, mode="r")["0"]
+        self.scale = read_scale(zarr_path)
+        self.quantiles = read_quantiles(zarr_path)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return tuple(self._arr.shape)
+
+    @property
+    def n_timepoints(self) -> int:
+        return int(self._arr.shape[0])
+
+    def frame(self, t: int) -> np.ndarray:
+        """One timepoint, `(Z, Y, X)`. This is exactly one stored chunk."""
+        return np.asarray(self._arr[t])
+
+    def normalised_frame(
+        self, t: int, q_lo: float = 0.01, q_hi: float = 0.99
+    ) -> np.ndarray:
+        """Frame rescaled to roughly [0, 1] using the shipped quantiles."""
+        frame = self.frame(t).astype(np.float32)
+        lo = self.quantiles.get(q_lo)
+        hi = self.quantiles.get(q_hi)
+        if lo is None or hi is None or hi <= lo:
+            lo, hi = float(frame.min()), float(frame.max())
+        if hi <= lo:
+            return np.zeros_like(frame)
+        return np.clip((frame - lo) / (hi - lo), 0.0, None)
+
+
+def list_samples(directory: str, require_geff: bool = True) -> list[str]:
+    """Sample names in a data directory, sorted."""
+    names = {d[: -len(".zarr")] for d in os.listdir(directory) if d.endswith(".zarr")}
+    if require_geff:
+        geffs = {d[: -len(".geff")] for d in os.listdir(directory) if d.endswith(".geff")}
+        names &= geffs
+    return sorted(names)
+
+
+def graph_to_submission_rows(graph: Graph, dataset: str) -> list[tuple]:
+    """Flatten one graph into submission rows: nodes first, then edges.
+
+    Matches the organisers' `geffs_to_csv.py`. Coordinates are rounded to int,
+    fields unused by a row type are -1, and the leading `id` is added by the
+    caller so it stays consecutive across the whole file.
+    """
+    n = graph.nodes
+    rows: list[tuple] = [
+        (
+            dataset, "node", int(nid), int(tt),
+            int(round(float(zz))), int(round(float(yy))), int(round(float(xx))),
+            -1, -1,
+        )
+        for nid, tt, zz, yy, xx in zip(n.ids, n.t, n.z, n.y, n.x)
+    ]
+    rows.extend(
+        (dataset, "edge", -1, -1, -1, -1, -1, int(s), int(tg)) for s, tg in graph.edges
+    )
+    return rows
+
+
+def write_submission(graphs: dict[str, Graph], out_path: str) -> int:
+    """Write the submission CSV. Returns the row count.
+
+    Every dataset in the test set must appear, so the caller passes an entry per
+    sample even when a prediction is empty.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    written = 0
+    with open(out_path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(SUBMISSION_COLUMNS)
+        for dataset in sorted(graphs):
+            for row in graph_to_submission_rows(graphs[dataset], dataset):
+                w.writerow((written,) + row)
+                written += 1
+    return written
