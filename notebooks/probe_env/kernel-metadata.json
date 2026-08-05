@@ -1,0 +1,15 @@
+{
+  "id": "vyask21/cell-tracking-probe-env",
+  "title": "cell-tracking-probe-env",
+  "code_file": "probe_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "competition_sources": ["biohub-cell-tracking-during-development"],
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

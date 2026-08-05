@@ -27,6 +27,12 @@ COLUMNS = [
     "cv_mean",
     "cv_std",
     "folds",
+    # Leave-one-embryo-out gives two folds that ask different questions, so the
+    # mean hides the thing worth knowing. Per-fold scores go here, as
+    # "44b6=0.412,6bba=0.501", and the bootstrap interval on each fold goes in
+    # cv_ci. A change is believed only when both folds move the same way.
+    "cv_detail",
+    "cv_ci",
     "lb_public",
     "lb_private",
     "submitted",
@@ -71,6 +77,8 @@ def append(
     cv_mean: float,
     cv_std: float,
     folds: int,
+    cv_detail: str = "",
+    cv_ci: str = "",
     notes: str = "",
 ) -> int:
     rows = _read()
@@ -86,6 +94,8 @@ def append(
             "cv_mean": f"{cv_mean:.6f}",
             "cv_std": f"{cv_std:.6f}",
             "folds": str(folds),
+            "cv_detail": cv_detail,
+            "cv_ci": cv_ci,
             "lb_public": "",
             "lb_private": "",
             "submitted": "no",
@@ -123,13 +133,16 @@ def table(limit: int = 20) -> str:
         return "(ledger empty)"
     rows.sort(key=lambda r: float(r["cv_mean"] or 0), reverse=True)
     # ASCII only: this prints to a Windows console that is not reliably UTF-8.
-    head = f"{'id':>3}  {'cv':>10} {'sd':>8}  {'lb':>10}  name"
+    head = f"{'id':>3}  {'cv':>10} {'sd':>8}  {'lb':>10}  {'per-fold':<28} name"
     lines = [head, "-" * len(head)]
     for r in rows[:limit]:
         lines.append(
             f"{r['id']:>3}  {r['cv_mean']:>10} {r['cv_std']:>8}  "
-            f"{r['lb_public'] or '-':>10}  {r['name']}"
+            f"{r['lb_public'] or '-':>10}  {r.get('cv_detail', '') or '-':<28} {r['name']}"
         )
+    lines.append("")
+    lines.append("cv is the mean over leave-one-embryo-out folds and hides the")
+    lines.append("difference between them. Read per-fold before believing a change.")
     return "\n".join(lines)
 
 
