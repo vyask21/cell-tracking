@@ -39,16 +39,39 @@ Config: {config_name} ({config_hash})
 
 import os
 import sys
-import zipfile
 
-# The code arrives as a zip inside an attached dataset. A zip rather than loose
-# files because Kaggle datasets do not preserve directory structure: the CLI's
-# --dir-mode only offers skip, zip or tar, so a `src/` package cannot be uploaded
-# as a tree. The rerun has no internet, so an attached dataset is the only way in.
-CODE = "/kaggle/working/code"
-os.makedirs(CODE, exist_ok=True)
-with zipfile.ZipFile("/kaggle/input/{dataset_slug}/{archive}") as zf:
-    zf.extractall(CODE)
+# The code is uploaded as a zip, which Kaggle expands on ingest, so the dataset
+# root already holds src/ and conf/ as directories and can go straight on the
+# path. An attached dataset is the only way code gets in: the rerun has no
+# internet, so there is no installing anything.
+def find_code_dir():
+    """Locate the directory holding src/predict.py under /kaggle/input.
+
+    The mount layout is not stable across Kaggle's own conventions: datasets have
+    turned up at both /kaggle/input/<slug> and /kaggle/input/datasets/<user>/<slug>.
+    Searching for the file we actually need is immune to that, and to anyone
+    renaming the dataset later.
+    """
+    candidates = [
+        "/kaggle/input/{dataset_slug}",
+        "/kaggle/input/datasets/{user}/{dataset_slug}",
+    ]
+    for path in candidates:
+        if os.path.isfile(os.path.join(path, "src", "predict.py")):
+            return path
+    for root, dirs, _ in os.walk("/kaggle/input"):
+        if os.path.isfile(os.path.join(root, "src", "predict.py")):
+            return root
+        # The competition data is tens of thousands of files; never descend it.
+        dirs[:] = [d for d in dirs if d != "competitions"]
+    raise SystemExit(
+        "could not find src/predict.py under /kaggle/input. "
+        "Is the code dataset attached to this notebook?"
+    )
+
+
+CODE = find_code_dir()
+print("code dir:", CODE)
 sys.path.insert(0, CODE)
 
 os.environ.setdefault(
@@ -151,6 +174,7 @@ def push_kernel(staging: Path, user: str, cfg, competition: str) -> str:
             config_file=Path(cfg.path).name,
             dataset_slug=DATASET_SLUG,
             archive=ARCHIVE_NAME,
+            user=user,
         ),
         encoding="utf-8",
     )
