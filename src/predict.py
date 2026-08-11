@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
+import traceback
 
 from src.config import load_config
-from src.data import list_samples, write_submission
+from src.data import list_samples, verify_submission, write_submission
 from src.pipeline import predict_sample
 
 
@@ -46,9 +48,22 @@ def run(
 
     graphs = {}
     empty = []
+    failed = []
     t0 = time.time()
     for i, sample in enumerate(samples, 1):
-        graph, stats = predict_sample(os.path.join(test_dir, sample + ".zarr"), cfg)
+        # One bad sample out of roughly 200 must not cost the whole rerun. The
+        # traceback is printed in full so a failure is diagnosable from the Kaggle
+        # log, and the sample still reaches the CSV as a placeholder below.
+        try:
+            graph, stats = predict_sample(os.path.join(test_dir, sample + ".zarr"), cfg)
+        except Exception:
+            failed.append(sample)
+            print(f"  [{i}/{len(samples)}] {sample}: FAILED", flush=True)
+            # To stdout, not stderr, so the traceback stays next to the progress
+            # line it belongs to in the Kaggle log rather than in a separate stream.
+            traceback.print_exc(file=sys.stdout)
+            sys.stdout.flush()
+            continue
         graphs[sample] = graph
         if stats["n_nodes"] == 0:
             empty.append(sample)
@@ -63,14 +78,23 @@ def run(
 
     if empty:
         print(f"\nWARNING: {len(empty)} samples produced no detections: {empty[:10]}")
+    if failed:
+        print(f"\nWARNING: {len(failed)} samples raised and were skipped: {failed[:10]}")
 
     tag = f"{cfg.name}_{cfg.hash()}"
     if exp_id is not None:
         tag = f"exp{exp_id}_{tag}"
     out = out_path or str(cfg.sub_dir / f"{tag}.csv")
-    rows = write_submission(graphs, out)
+    rows, backfilled = write_submission(graphs, out, datasets=samples)
+    verify_submission(out, samples)
 
-    print(f"\nwrote {rows} rows for {len(graphs)} datasets to {out}")
+    if backfilled:
+        print(
+            f"WARNING: {len(backfilled)} dataset(s) written as a placeholder node "
+            f"and will score zero on edges: {backfilled[:10]}"
+        )
+    print(f"\nwrote {rows} rows for {len(samples)} datasets to {out}")
+    print(f"verified all {len(samples)} datasets present")
     print(f"total {(time.time() - t0) / 60:.1f} min")
     return out
 

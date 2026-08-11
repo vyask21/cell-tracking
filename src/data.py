@@ -238,19 +238,77 @@ def graph_to_submission_rows(graph: Graph, dataset: str) -> list[tuple]:
     return rows
 
 
-def write_submission(graphs: dict[str, Graph], out_path: str) -> int:
-    """Write the submission CSV. Returns the row count.
+# A dataset that produced nothing still has to appear in the CSV, so it gets one
+# placeholder node. The coordinate is an honest in-volume voxel and deliberately
+# not the out-of-volume sentinel used by the metric hack on the public
+# leaderboard. An unmatched predicted node is not an edge false positive; it costs
+# only its share of the node-count penalty, and one node against a per-sample
+# estimate of order 24,000 is nothing. The sample then scores zero on edges, which
+# is the truthful score for a sample nothing was detected in.
+PLACEHOLDER_ROW = ("node", 0, 0, 0, 0, 0, -1, -1)
 
-    Every dataset in the test set must appear, so the caller passes an entry per
-    sample even when a prediction is empty.
+
+def write_submission(
+    graphs: dict[str, Graph],
+    out_path: str,
+    datasets: list[str] | None = None,
+) -> tuple[int, list[str]]:
+    """Write the submission CSV. Returns (row count, names that were backfilled).
+
+    `datasets` is the authoritative list of names that must appear, normally the
+    `.zarr` folders in the test directory. Any name missing from `graphs`, or
+    present with an empty graph, is backfilled with a placeholder node row.
+
+    This is the enforcement point for the rule that **every dataset in the test
+    set must appear**. A dataset absent from the CSV invalidates the entire
+    submission; a dataset scoring zero costs only that one sample. Relying on the
+    caller to pass a non-empty graph per sample is not enough, because an empty
+    graph flattens to zero rows and the name silently disappears.
     """
+    expected = sorted(set(datasets) | set(graphs)) if datasets is not None else sorted(graphs)
+
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
     written = 0
+    backfilled: list[str] = []
     with open(out_path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(SUBMISSION_COLUMNS)
-        for dataset in sorted(graphs):
-            for row in graph_to_submission_rows(graphs[dataset], dataset):
+        for dataset in expected:
+            graph = graphs.get(dataset)
+            rows = graph_to_submission_rows(graph, dataset) if graph is not None else []
+            if not rows:
+                rows = [(dataset,) + PLACEHOLDER_ROW]
+                backfilled.append(dataset)
+            for row in rows:
                 w.writerow((written,) + row)
                 written += 1
-    return written
+    return written, backfilled
+
+
+def verify_submission(out_path: str, datasets: list[str]) -> None:
+    """Re-read the written CSV and check every expected dataset is in it.
+
+    Deliberately reads the file back rather than trusting what the writer thinks
+    it did. This is the last line of defence before a 12 h rerun produces a
+    submission that scores zero for a reason no local number would have shown.
+    Raises rather than returning a flag, because there is no sane way to continue.
+    """
+    seen: set[str] = set()
+    with open(out_path, newline="", encoding="utf-8") as fh:
+        r = csv.reader(fh)
+        header = next(r, None)
+        if tuple(header or ()) != SUBMISSION_COLUMNS:
+            raise SystemExit(f"submission header is {header}, expected {list(SUBMISSION_COLUMNS)}")
+        col = SUBMISSION_COLUMNS.index("dataset")
+        for row in r:
+            seen.add(row[col])
+
+    missing = sorted(set(datasets) - seen)
+    extra = sorted(seen - set(datasets))
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} dataset(s) missing from {out_path}: {missing[:10]}. "
+            "Every dataset in the test set must appear or the submission is invalid."
+        )
+    if extra:
+        raise SystemExit(f"{len(extra)} unexpected dataset(s) in {out_path}: {extra[:10]}")
