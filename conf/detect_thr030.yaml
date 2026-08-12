@@ -1,6 +1,9 @@
-# The anchor baseline. No learned parameters: smooth, take local maxima, link by
-# optimal assignment on physical distance. Its only job is to prove the pipeline
-# runs end to end and to give every later experiment an honest number to beat.
+# Baseline with a lower detection threshold. One variable against
+# conf/baseline.yaml: threshold_scale 0.5 becomes 0.30.
+#
+# Motivated by the baseline's node recall, 0.7211 on the 44b6 fold and 0.8211 on
+# 6bba. Missed cells cost edge recall outright, so the question is whether
+# accepting dimmer peaks buys back more edges than the node-count penalty charges.
 #
 # The detection settings deliberately err toward over-detection. A predicted node
 # that matches nothing costs nothing on the edge term, and surplus nodes are
