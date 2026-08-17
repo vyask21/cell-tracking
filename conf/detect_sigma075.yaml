@@ -1,0 +1,53 @@
+# Baseline with less pre-smoothing. One variable against conf/baseline.yaml:
+# sigma_um 2.0 becomes 0.75. Everything else, including min_sep_um and
+# threshold_scale, is untouched.
+#
+# Motivated by scripts/probe_detect_grid.py. The thr030 result said the detector
+# is not threshold-limited; the probe says it is smoothing-limited. At the
+# baseline's suppression footprint, dropping sigma from 2.0 to 0.75 moves matched
+# node recall from 0.670 to 0.890 while the detection count goes from 0.59x the
+# organisers' estimated node count to 1.24x, which the node-count penalty charges
+# about 2.4% for. That is a large recall gain at almost no penalty cost.
+#
+# Why not go further. Recall saturates at 0.927 by sigma 0.5 and does not improve
+# at 0.35 while the node count keeps climbing, so below 0.5 the penalty is paid for
+# nothing. sigma 0.5 scores marginally better than 0.75 on the probe's proxy
+# (0.879 against 0.869), but the proxy ignores linking, and 0.75 emits 1.24x the
+# true node count against 1.51x. Denser frames make the linker's assignment harder
+# and can create edge false positives that the proxy cannot see, so the first full
+# run takes the more conservative of the two. 0.5 is the follow-up if this lands.
+#
+# Why not min_sep_um instead, which NOTES.md had named as the next experiment.
+# Because it is not a usable continuous knob here. See NOTES.md: the micron value
+# is converted to an odd voxel footprint, and against the 1.625 um Z spacing only
+# two Z footprints are reachable, 3 voxels or 1. At 1 there is no Z suppression at
+# all and one nucleus emits a detection per Z slice.
+name: detect_sigma075
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out   # leave_one_embryo_out | within_embryo_kfold
+  # n_splits only applies to within_embryo_kfold, which is a screening split and
+  # does not mirror the embryo-disjoint test set.
+
+detect:
+  # All spatial settings are in microns. Voxels are anisotropic, 1.625 in Z
+  # against 0.40625 in Y and X, and the metric matches in physical space.
+  sigma_um: 0.75
+  min_sep_um: 3.0
+  # Multiplies the per-frame Otsu threshold. Below 1.0 accepts dimmer peaks.
+  # Held at the baseline value: thr030 showed a 40% cut moves node counts by about
+  # 1%, so this is not the binding constraint and changing it here would make two
+  # variables move at once.
+  threshold_scale: 0.5
+  max_detections: 20000
+
+link:
+  # The scorer matches nodes under a 7 um cap, so linking further than that can
+  # never produce a true positive edge.
+  max_link_um: 7.0
+  # 0 disables division prediction. Only 151 divisions are annotated across all
+  # 199 samples and 112 samples have none, so spurious forks can easily cost more
+  # than the 0.1-weighted division term is worth. Turn this on as its own
+  # experiment, not as part of another change.
+  max_division_um: 0.0
