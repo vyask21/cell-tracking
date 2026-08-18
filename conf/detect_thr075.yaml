@@ -26,8 +26,19 @@ detect:
   max_detections: 20000
 
 link:
-  # The scorer matches nodes under a 7 um cap, so linking further than that can
-  # never produce a true positive edge.
+  # The 7 um cap in the metric governs **node-to-node matching**, a predicted node
+  # against a ground-truth node. It is not a cap on edge length: a predicted edge
+  # spanning 12 um still scores as a true positive whenever each endpoint is
+  # independently within 7 um of its own GT node. An earlier comment here claimed
+  # the opposite and it was wrong.
+  #
+  # 7.0 is nonetheless kept, now for a measured reason. True cell displacement has
+  # median 1.82 um and p99 8.38 um, and 170 GT edges in the 9-sample diagnostic
+  # (3.9%) were refused only by this cap. Raising it was screened end to end with
+  # the scorer in scripts/screen_link_cap.py: 9 um is flat (+0.0011, and it splits
+  # across embryos), and 12 um and above lose badly because the extra false
+  # positives outrun the recovered true positives and the one-to-one assignment
+  # rearranges into worse global matches. Right value, wrong original reason.
   max_link_um: 7.0
   # 0 disables division prediction. Only 151 divisions are annotated across all
   # 199 samples and 112 samples have none, so spurious forks can easily cost more
