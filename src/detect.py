@@ -141,12 +141,26 @@ def detect_sequence(
     min_sep_um: float = 3.0,
     threshold_scale: float = 0.5,
     max_detections: int = 20000,
+    z_shift_vox: float = 0.0,
     timepoints: range | None = None,
     progress_every: int = 0,
 ) -> list[np.ndarray]:
     """Detect over every timepoint of one sample. `image` is a `src.data.Image`.
 
     Returns a list indexed by t, each `(N_t, 3)` in voxel coordinates.
+
+    `z_shift_vox` adds a constant offset along Z, in voxels, after detection. It
+    corrects a measured systematic bias: predictions sit below the annotated centre
+    in Z, and Z carries 61% of the squared localisation error even on cells that do
+    match. This is not a coordinate convention error, which was checked separately
+    (ground-truth z spans the full 0..63 voxel range, is integer, and is 0-based
+    like the image). The most plausible cause is the light-sheet PSF being
+    asymmetric in Z combined with Z being smoothed far less than Y and X in voxel
+    terms, sigma 1.23 voxels against 4.92.
+
+    A constant shift changes no node counts, so the node-count penalty is untouched
+    and the entire effect is localisation. Detections are clipped to the volume so
+    a shifted point cannot leave the image.
     """
     ts = timepoints if timepoints is not None else range(image.n_timepoints)
     out = []
@@ -160,6 +174,9 @@ def detect_sequence(
             threshold_scale=threshold_scale,
             max_detections=max_detections,
         )
+        if z_shift_vox and coords.shape[0]:
+            coords = coords.copy()
+            coords[:, 0] = np.clip(coords[:, 0] + z_shift_vox, 0, image.shape[-3] - 1)
         out.append(coords)
         if progress_every and (i + 1) % progress_every == 0:
             print(f"    t={t + 1}/{len(ts)}  {coords.shape[0]} detections", flush=True)

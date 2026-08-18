@@ -1,0 +1,65 @@
+# The anchor baseline. No learned parameters: smooth, take local maxima, link by
+# optimal assignment on physical distance. Its only job is to prove the pipeline
+# runs end to end and to give every later experiment an honest number to beat.
+#
+# The detection settings deliberately err toward over-detection. A predicted node
+# that matches nothing costs nothing on the edge term, and surplus nodes are
+# charged only through 1 - 0.1 * (N_pred - N_true) / N_true, so doubling the node
+# count costs 10% while missing a real cell costs edge recall outright.
+name: detect_zshift2
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out   # leave_one_embryo_out | within_embryo_kfold
+  # n_splits only applies to within_embryo_kfold, which is a screening split and
+  # does not mirror the embryo-disjoint test set.
+
+detect:
+  # All spatial settings are in microns. Voxels are anisotropic, 1.625 in Z
+  # against 0.40625 in Y and X, and the metric matches in physical space.
+  sigma_um: 2.0
+  min_sep_um: 3.0
+  # Multiplies the per-frame Otsu threshold. Below 1.0 accepts dimmer peaks.
+  # A fixed absolute threshold was measured returning 0.05x to 1.46x the true
+  # cell count across samples, so the threshold is derived per frame instead.
+  threshold_scale: 0.5
+  max_detections: 20000
+  # Constant offset along Z, in voxels (1 voxel is 1.625 um), applied after
+  # detection. The one variable against conf/baseline.yaml.
+  #
+  # Corrects a measured systematic bias rather than a guess. Predictions sit below
+  # the annotated centre in Z, and Z carries 61% of the squared localisation error
+  # even on cells that already match. Checked first that this is not a coordinate
+  # convention error: ground-truth z spans the full 0..63 voxel range, is integer,
+  # and is 0-based like the image. So it is a real property of the detector.
+  #
+  # 2.0 came from scripts/screen_z_shift.py, scored end to end with the organisers'
+  # scorer on 9 samples. The curve rises to 2.0 and falls away after, and **both
+  # embryos peak at 2.0 independently**, which is why a value chosen on one fold's
+  # training embryo transfers to the other. It gains TP, FN and FP simultaneously,
+  # which is the signature of a localisation fix rather than a recall/penalty trade.
+  #
+  # A constant shift changes no node counts, so the node-count penalty is identical
+  # to baseline and the entire effect is localisation.
+  z_shift_vox: 2.0
+
+link:
+  # The 7 um cap in the metric governs **node-to-node matching**, a predicted node
+  # against a ground-truth node. It is not a cap on edge length: a predicted edge
+  # spanning 12 um still scores as a true positive whenever each endpoint is
+  # independently within 7 um of its own GT node. An earlier comment here claimed
+  # the opposite and it was wrong.
+  #
+  # 7.0 is nonetheless kept, now for a measured reason. True cell displacement has
+  # median 1.82 um and p99 8.38 um, and 170 GT edges in the 9-sample diagnostic
+  # (3.9%) were refused only by this cap. Raising it was screened end to end with
+  # the scorer in scripts/screen_link_cap.py: 9 um is flat (+0.0011, and it splits
+  # across embryos), and 12 um and above lose badly because the extra false
+  # positives outrun the recovered true positives and the one-to-one assignment
+  # rearranges into worse global matches. Right value, wrong original reason.
+  max_link_um: 7.0
+  # 0 disables division prediction. Only 151 divisions are annotated across all
+  # 199 samples and 112 samples have none, so spurious forks can easily cost more
+  # than the 0.1-weighted division term is worth. Turn this on as its own
+  # experiment, not as part of another change.
+  max_division_um: 0.0
