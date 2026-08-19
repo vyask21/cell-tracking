@@ -28,18 +28,38 @@ def predict_sample(
     link_cfg = cfg.link or {}
 
     t0 = time.time()
-    detections = detect_sequence(
-        image,
-        sigma_um=float(detect_cfg.get("sigma_um", 2.0)),
-        min_sep_um=float(detect_cfg.get("min_sep_um", 3.0)),
-        threshold_scale=float(detect_cfg.get("threshold_scale", 0.5)),
-        max_detections=int(detect_cfg.get("max_detections", 20000)),
-        suppress_radii_um=(tuple(float(v) for v in detect_cfg["suppress_radii_um"])
-                           if detect_cfg.get("suppress_radii_um") else None),
-        z_shift_vox=float(detect_cfg.get("z_shift_vox", 0.0)),
-        timepoints=timepoints,
-        progress_every=25 if verbose else 0,
-    )
+    backend = str(detect_cfg.get("backend", "localmax"))
+    if backend == "unet":
+        # The learned detector returns the same contract, a list indexed by t of
+        # (N, 3) full-resolution voxel coordinates, so everything downstream is
+        # untouched and the detector is the only variable.
+        from src.unet import detect_sequence_unet
+
+        detections = detect_sequence_unet(
+            zarr_path,
+            det_threshold=float(detect_cfg.get("det_threshold", 0.955)),
+            pool_kernel_um=float(detect_cfg.get("pool_kernel_um", 5.0)),
+            det_tta=bool(detect_cfg.get("det_tta", False)),
+            device=str(detect_cfg.get("device", "cpu")),
+            weights=detect_cfg.get("weights"),
+            timepoints=timepoints,
+            progress_every=25 if verbose else 0,
+        )
+    elif backend != "localmax":
+        raise ValueError(f"unknown detect.backend {backend!r}")
+    else:
+        detections = detect_sequence(
+            image,
+            sigma_um=float(detect_cfg.get("sigma_um", 2.0)),
+            min_sep_um=float(detect_cfg.get("min_sep_um", 3.0)),
+            threshold_scale=float(detect_cfg.get("threshold_scale", 0.5)),
+            max_detections=int(detect_cfg.get("max_detections", 20000)),
+            suppress_radii_um=(tuple(float(v) for v in detect_cfg["suppress_radii_um"])
+                               if detect_cfg.get("suppress_radii_um") else None),
+            z_shift_vox=float(detect_cfg.get("z_shift_vox", 0.0)),
+            timepoints=timepoints,
+            progress_every=25 if verbose else 0,
+        )
     t_detect = time.time() - t0
 
     t0 = time.time()

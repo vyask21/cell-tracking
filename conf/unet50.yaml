@@ -1,0 +1,42 @@
+# The learned detector, with the linker held fixed at the baseline's settings so
+# the detector is the only thing that changes. Weights are the community
+# 50-epoch training of the architecture the organisers released, published as
+# srcA/biohub-tracking-support-pack-50ep-v1. Public and freely available, so
+# within the rules on pretrained models.
+#
+# The organisers' own 3-epoch release scores about 0.79 on the leaderboard, which
+# is level with our local-max baseline. The 50-epoch pack is what the public
+# notebooks near 0.908 are built on, so this config is the anchor for that path
+# rather than a reproduction of the released checkpoint.
+#
+# Read before trusting any number from this config: the pack was trained on the
+# reference seed-0 90/10 split, which is 180 of the 199 training videos. Scoring
+# it on any of those 180 is leakage. Only the 19 it held out are honest, and they
+# are listed in NOTES.md.
+name: unet50_localmax_link
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  backend: unet                # unet | localmax
+  # Sigmoid probability a local-max peak must clear. The organisers released
+  # 0.99; the public notebooks sit near 0.955 to 0.969 and report this as one of
+  # the few settings that actually moves the score. Chosen on folds, not copied.
+  det_threshold: 0.9550
+  # Local-max suppression distance in microns, applied in the downsampled grid
+  # where the voxel is 1.625 um on every axis, so the kernel is 3x3x3.
+  pool_kernel_um: 5.0
+  # Average detection logits over Y and X flips. Z is never flipped: the data is
+  # four times coarser in Z, so a Z-flipped volume is out of distribution.
+  det_tta: false
+  device: cpu                  # cuda in a Kaggle notebook
+  weights: external/pack50/weights/unet_transformer/split_0/edge_predictor_best.pth
+
+link:
+  # Unchanged from conf/baseline.yaml. The 7 um cap is on node-to-node matching,
+  # not edge length, and 7.0 was confirmed as the right value by
+  # scripts/screen_link_cap.py. Divisions stay off on the bound in NOTES.md.
+  max_link_um: 7.0
+  max_division_um: 0.0
