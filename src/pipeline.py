@@ -34,6 +34,8 @@ def predict_sample(
         min_sep_um=float(detect_cfg.get("min_sep_um", 3.0)),
         threshold_scale=float(detect_cfg.get("threshold_scale", 0.5)),
         max_detections=int(detect_cfg.get("max_detections", 20000)),
+        suppress_radii_um=(tuple(float(v) for v in detect_cfg["suppress_radii_um"])
+                           if detect_cfg.get("suppress_radii_um") else None),
         z_shift_vox=float(detect_cfg.get("z_shift_vox", 0.0)),
         timepoints=timepoints,
         progress_every=25 if verbose else 0,

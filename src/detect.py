@@ -80,6 +80,33 @@ def otsu_threshold(values: np.ndarray, nbins: int = 256) -> float:
     return float(centres[int(np.argmax(between))])
 
 
+def ellipsoid_footprint(radii_um, scale_zyx) -> np.ndarray:
+    """Boolean suppression mask that is an ellipsoid in physical space.
+
+    `maximum_filter(size=...)` takes a box measured in voxels, and voxels are four
+    times coarser in Z than in Y and X. At `min_sep_um` 3.0 that box reaches 1
+    voxel in Z, which is 1.625 um, against 3 voxels in Y and X, which is 1.219 um.
+    So the box suppresses a neighbour one Z step away however far it sits in Y and
+    X, and `scripts/diagnose_localisation.py` measured Z as carrying 61% of the
+    squared localisation error.
+
+    An ellipsoid stated in microns spends the Z budget where it belongs: one Z step
+    away only the near column is suppressed and the corners the box was claiming
+    are given back. Z extent is still quantised to whole voxels, so a Z radius
+    below 1.625 um means no Z suppression at all, and anything in [1.625, 3.25)
+    means one voxel either side.
+    """
+    radii = np.asarray(radii_um, dtype=np.float64)
+    scale = np.asarray(scale_zyx, dtype=np.float64)
+    if radii.shape != (3,) or np.any(radii <= 0):
+        raise ValueError(f"suppress_radii_um must be three positive microns, got {radii_um}")
+    reach = np.floor(radii / scale + 1e-9).astype(int)
+    offsets = [np.arange(-r, r + 1) * s for r, s in zip(reach, scale)]
+    grids = np.meshgrid(*offsets, indexing="ij")
+    dist2 = sum((g / r) ** 2 for g, r in zip(grids, radii))
+    return dist2 <= 1.0 + 1e-9
+
+
 def detect_frame(
     frame: np.ndarray,
     scale_zyx: tuple[float, float, float],
@@ -89,6 +116,7 @@ def detect_frame(
     threshold_scale: float = 0.5,
     min_threshold: float = 0.02,
     max_detections: int = 20000,
+    suppress_radii_um: tuple[float, float, float] | None = None,
 ) -> np.ndarray:
     """Detect cell centres in one `(Z, Y, X)` frame. Returns `(N, 3)` of (z, y, x).
 
@@ -107,8 +135,14 @@ def detect_frame(
     # density differences between samples do not need a hand-set threshold.
     thr = max(otsu_threshold(smooth.ravel()) * threshold_scale, min_threshold)
 
-    footprint = _odd(np.asarray(min_sep_um, dtype=np.float64) / scale)
-    peak = smooth == ndi.maximum_filter(smooth, size=tuple(footprint))
+    # `suppress_radii_um` replaces the voxel box with an ellipsoid in microns.
+    # Left at None the box is used, so existing configs are bit-for-bit unchanged.
+    if suppress_radii_um is None:
+        footprint = _odd(np.asarray(min_sep_um, dtype=np.float64) / scale)
+        peak = smooth == ndi.maximum_filter(smooth, size=tuple(footprint))
+    else:
+        mask = ellipsoid_footprint(suppress_radii_um, scale)
+        peak = smooth == ndi.maximum_filter(smooth, footprint=mask)
     peak &= smooth > thr
 
     coords = np.argwhere(peak)
@@ -141,6 +175,7 @@ def detect_sequence(
     min_sep_um: float = 3.0,
     threshold_scale: float = 0.5,
     max_detections: int = 20000,
+    suppress_radii_um: tuple[float, float, float] | None = None,
     z_shift_vox: float = 0.0,
     timepoints: range | None = None,
     progress_every: int = 0,
@@ -173,6 +208,7 @@ def detect_sequence(
             min_sep_um=min_sep_um,
             threshold_scale=threshold_scale,
             max_detections=max_detections,
+            suppress_radii_um=suppress_radii_um,
         )
         if z_shift_vox and coords.shape[0]:
             coords = coords.copy()
