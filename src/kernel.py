@@ -367,6 +367,33 @@ if {require_disjoint} and overlap:
     raise SystemExit(f"fold {split} should be embryo-disjoint but shares {{overlap}}")
 print(f"fold {split} shares embryos with its test set: {{sorted(overlap)}}",
       flush=True)
+
+# Drop any video the mount does not actually carry. The reference loader raises
+# FileNotFoundError on the first missing image and takes the whole run with it,
+# which cost a 48 minute job for one absent file. A split is a list of names
+# written on another machine, so it is a claim about the mount rather than a
+# fact, and it gets checked here.
+def _present(stem):
+    return os.path.isdir(os.path.join(DATA, stem + ".zarr"))
+
+missing_train = [s for s in train_stems if not _present(s)]
+missing_test = [s for s in test_stems if not _present(s)]
+if missing_train or missing_test:
+    print(f"WARNING: {{len(missing_train)}} train and {{len(missing_test)}} test "
+          f"videos are not on this mount and are dropped: "
+          f"{{(missing_train + missing_test)[:5]}}", flush=True)
+    train_stems = [s for s in train_stems if _present(s)]
+    test_stems = [s for s in test_stems if _present(s)]
+    if not train_stems or not test_stems:
+        raise SystemExit("a whole side of the split is missing; nothing to train on")
+    # Rewrite the splits file so the trainer reads the filtered lists. It takes a
+    # path, not a list, so filtering in memory here would have no effect.
+    SPLITS = "/kaggle/working/splits_filtered.json"
+    with open(SPLITS, "w") as fh:
+        json.dump([{{"split": {split}, "train": train_stems, "test": test_stems}}],
+                  fh)
+    print(f"filtered splits written to {{SPLITS}}: {{len(train_stems)}} train, "
+          f"{{len(test_stems)}} test", flush=True)
 print(f"fold {split}: {{len(train_stems)}} train videos "
       f"({{sorted({{emb(a) for a in train_stems}})}}), "
       f"{{len(test_stems)}} test ({{sorted({{emb(b) for b in test_stems}})}})",
