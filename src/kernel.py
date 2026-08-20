@@ -325,7 +325,8 @@ def find_code_dir():
 PACK = find_pack_dir()
 CODE = find_code_dir()
 SPLITS = os.path.join(CODE, "meta", "dataset_splits.json")
-print("pack:", PACK, "\ncode:", CODE, flush=True)
+print("pack:", PACK, flush=True)
+print("code:", CODE, flush=True)
 
 subprocess.run(
     ["pip", "install", "--no-index", "--find-links", os.path.join(PACK, "wheels"),
@@ -379,7 +380,7 @@ sys.argv = [
 t0 = time.time()
 import train_unet_transformer
 train_unet_transformer.main()
-print(f"\ntotal {{(time.time() - t0) / 60:.1f}} min", flush=True)
+print("total minutes:", round((time.time() - t0) / 60, 1), flush=True)
 
 # Copy whatever the trainer saved into /kaggle/working so it survives as output.
 import shutil
