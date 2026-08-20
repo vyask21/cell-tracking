@@ -379,17 +379,32 @@ sys.argv = [
 
 t0 = time.time()
 import train_unet_transformer
+from pathlib import Path
+
+# The trainer writes its checkpoint to `dataspec.WEIGHTS_PATH`, which is derived
+# from the location of dataspec.py itself and therefore lands inside the pack
+# mount. That mount is read-only on Kaggle, so the run dies at the first save
+# with OSError errno 30, after loading every video. There is no environment
+# variable for it, unlike the data dir, so the module global is rebound here.
+# `train_unet_transformer` does `from dataspec import WEIGHTS_PATH`, so its own
+# global is the one that has to change; patching dataspec after import would
+# have no effect.
+train_unet_transformer.WEIGHTS_PATH = Path("/kaggle/working/weights")
+print("weights dir:", train_unet_transformer.WEIGHTS_PATH, flush=True)
+
 train_unet_transformer.main()
 print("total minutes:", round((time.time() - t0) / 60, 1), flush=True)
 
-# Copy whatever the trainer saved into /kaggle/working so it survives as output.
+# The checkpoint is already under /kaggle/working, which is what Kaggle keeps as
+# the kernel's output. Copy it to the root under a fold-tagged name so the two
+# folds cannot collide when both are attached to an inference kernel later.
 import shutil
-from pathlib import Path
 
-for pth in Path("/kaggle").rglob("edge_predictor_best.pth"):
-    if "working" in str(pth):
-        continue
-    dest = Path("/kaggle/working") / f"fold{split}_{{pth.name}}"
+found = sorted(Path("/kaggle/working/weights").rglob("edge_predictor_best.pth"))
+if not found:
+    print("WARNING: no checkpoint written", flush=True)
+for pth in found:
+    dest = Path("/kaggle/working") / ("fold{split}_" + pth.name)
     shutil.copy(pth, dest)
     print("saved", dest, dest.stat().st_size, "bytes", flush=True)
 '''
