@@ -69,10 +69,17 @@ def run(
             empty.append(sample)
         elapsed = time.time() - t0
         eta = elapsed / i * (len(samples) - i)
+        # detect and link are reported separately, not summed. On a GPU kernel
+        # the detect half is fast and the ILP link half is CPU bound and does
+        # not shrink, so a combined number cannot be extrapolated to the hidden
+        # test set. `fellback` marks a video whose solve was refused for running
+        # over budget, which is the signal that the time limit is binding.
+        fellback = " FELLBACK" if stats.get("ilp_fell_back") else ""
         print(
             f"  [{i}/{len(samples)}] {sample}: {stats['n_nodes']} nodes, "
             f"{stats['n_edges']} edges, {stats['n_divisions']} divisions "
-            f"({stats['detect_s'] + stats['link_s']:.1f}s, eta {eta / 60:.0f} min)",
+            f"(detect {stats['detect_s']:.1f}s, link {stats['link_s']:.1f}s, "
+            f"eta {eta / 60:.0f} min){fellback}",
             flush=True,
         )
 
