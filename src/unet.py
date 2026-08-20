@@ -74,7 +74,24 @@ def _ensure_pack_on_path() -> None:
             sys.path.insert(0, path)
 
 
-def load_detector(weights: str | os.PathLike | None = None, device: str = "cpu"):
+def resolve_device(device: str = "auto") -> str:
+    """Resolve `auto` to cuda when a GPU is present.
+
+    The config says `auto` so one config runs unchanged on this CPU machine and on
+    a Kaggle GPU kernel. Hard-coding `cuda` would break local runs and hard-coding
+    `cpu` would silently waste the GPU we asked for.
+    """
+    if device != "auto":
+        return device
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
+def load_detector(weights: str | os.PathLike | None = None, device: str = "auto"):
     """Load the model once. Returns `(model, window_size, downsample, torch)`.
 
     Loading is the expensive part on CPU, so callers scoring many samples should
@@ -89,7 +106,8 @@ def load_detector(weights: str | os.PathLike | None = None, device: str = "cpu")
         weights_path = default_weights()
     if not weights_path.exists():
         raise FileNotFoundError(f"no weights at {weights_path}")
-    model, window_size, downsample = load_model(weights_path, torch.device(device))
+    model, window_size, downsample = load_model(
+        weights_path, torch.device(resolve_device(device)))
     return model, window_size, downsample, torch
 
 
@@ -99,7 +117,7 @@ def detect_sequence_unet(
     det_threshold: float = 0.9550,
     pool_kernel_um: float = 5.0,
     det_tta: bool = False,
-    device: str = "cpu",
+    device: str = "auto",
     weights: str | os.PathLike | None = None,
     timepoints: range | None = None,
     progress_every: int = 0,
@@ -161,7 +179,7 @@ def detect_sequence_unet(
 
     wanted = set(ts)
     found: dict[int, np.ndarray] = {}
-    dev = torch.device(device)
+    dev = torch.device(resolve_device(device))
 
     with torch.no_grad():
         for i, ws in enumerate(starts):

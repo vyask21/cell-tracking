@@ -31,7 +31,9 @@ detect:
   # Average detection logits over Y and X flips. Z is never flipped: the data is
   # four times coarser in Z, so a Z-flipped volume is out of distribution.
   det_tta: false
-  device: cpu                  # cuda in a Kaggle notebook
+  # auto resolves to cuda on a Kaggle GPU kernel and cpu here, so one config
+  # runs unchanged in both places.
+  device: auto
 
 link:
   # Unchanged from conf/baseline.yaml. The 7 um cap is on node-to-node matching,
