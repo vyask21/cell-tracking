@@ -85,14 +85,38 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
         narrowed.append({"i": aff["i"][keep], "j": aff["j"][keep],
                          "p": aff["p"][keep]})
 
-    graph = link_sequence_ilp(
-        detections, narrowed, scale,
-        edge_weight=float(ilp_cfg.get("edge_weight", -1.0)),
-        appearance_weight=float(ilp_cfg.get("appearance_weight", 0.1)),
-        disappearance_weight=float(ilp_cfg.get("disappearance_weight", 0.1)),
-        division_weight=float(ilp_cfg.get("division_weight", 1.0)),
-        num_threads=1, gap=0.0, timeout=1800.0,
-    )
+    # The ILP depends only on the candidate set, so every arm sharing a gate
+    # shares a solve. Six of the eight arms use 7 um, and the solve is the
+    # expensive part at up to ten minutes on the largest video, so caching it by
+    # gate turns eight solves into two.
+    from src.data import Graph, Nodes
+
+    solve_dir = os.path.join(cache_dir, f"ilp_gate{gate:g}")
+    os.makedirs(solve_dir, exist_ok=True)
+    solved_path = os.path.join(solve_dir, sample + ".npz")
+    if os.path.exists(solved_path):
+        z = np.load(solved_path)
+        graph = Graph(
+            nodes=Nodes(ids=z["ids"], t=z["t"], z=z["z"], y=z["y"], x=z["x"]),
+            edges=z["edges"],
+        )
+    else:
+        graph = link_sequence_ilp(
+            detections, narrowed, scale,
+            edge_weight=float(ilp_cfg.get("edge_weight", -1.0)),
+            appearance_weight=float(ilp_cfg.get("appearance_weight", 0.1)),
+            disappearance_weight=float(ilp_cfg.get("disappearance_weight", 0.1)),
+            division_weight=float(ilp_cfg.get("division_weight", 1.0)),
+            num_threads=1, gap=0.0, timeout=1800.0,
+        )
+        tmp = solved_path + ".tmp.npz"
+        np.savez_compressed(
+            tmp, ids=np.asarray(graph.nodes.ids), t=np.asarray(graph.nodes.t),
+            z=np.asarray(graph.nodes.z), y=np.asarray(graph.nodes.y),
+            x=np.asarray(graph.nodes.x), edges=graph.edges,
+        )
+        os.replace(tmp, solved_path)
+
     graph, _ = calibrate(graph, scale, cfg)
 
     gt = os.path.join(data_dir, sample + ".geff")
