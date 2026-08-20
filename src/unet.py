@@ -221,3 +221,255 @@ def detect_sequence_unet(
                       flush=True)
 
     return [found.get(t, np.empty((0, 3), dtype=np.float64)) for t in ts]
+
+
+def detect_and_score_sequence(
+    zarr_path: str | os.PathLike,
+    model=None,
+    det_threshold: float = 0.9550,
+    pool_kernel_um: float = 5.0,
+    det_tta: bool = False,
+    device: str = "auto",
+    weights: str | os.PathLike | None = None,
+    edge_activation: str = "softmax",
+    edge_threshold: float = 0.05,
+    max_link_um: float = 7.0,
+    max_frames: int | None = None,
+    progress_every: int = 0,
+) -> tuple[list[np.ndarray], list[dict]]:
+    """Detect and score candidate links in one pass, returning both.
+
+    Why one function rather than detect then link. The edge head consumes the
+    U-Net feature map for the window the frame was detected in, so scoring a
+    link after the fact would mean running the U-Net a second time, and that is
+    the expensive half. `detect_sequence_unet` throws `unet_out` away; this
+    keeps it and pays for edge scoring with what is already in memory.
+
+    Returns `(detections, affinities)`.
+
+    `detections` is exactly what `detect_sequence_unet` returns, a list indexed
+    by t of `(N, 3)` full resolution voxel coordinates, and for the same
+    detection settings it is the same list. The detector is unchanged here.
+
+    `affinities[t]` describes the links from frame t to frame t+1 as
+    `{"i": (K,) int32, "j": (K,) int32, "p": (K,) float32}`, indices into
+    `detections[t]` and `detections[t+1]`. Only pairs that clear
+    `edge_threshold` and sit within `max_link_um` are kept. The gate matters: a
+    dense score matrix per frame pair is a few megabytes and there are about 99
+    of them per video, and the linker discards everything beyond `max_link_um`
+    anyway, so carrying the rest would cost memory to reach the same answer.
+
+    `max_frames` truncates the video, for checking this against the pack's own
+    `predict_video` cheaply. Leave it None for real runs.
+
+    `edge_activation` follows the pack: `softmax` normalises each target node's
+    scores over the source nodes, `sigmoid` scores each pair independently.
+    Softmax is the pack's default and what its reported numbers use.
+    """
+    _ensure_pack_on_path()
+    import torch
+    from biohub_tracking.io import open_dataset
+    from predict_unet_transformer import (
+        _detect_cells_pooled,
+        _load_frame,
+        pool_kernel_from_um,
+    )
+    from train_unet_transformer import extract_pos_features
+    import zarr
+
+    if model is None:
+        model, window_size, downsample, torch = load_detector(weights, device)
+    else:
+        model, window_size, downsample, torch = model
+
+    ds = open_dataset(Path(zarr_path), normalize=False, load_image=False,
+                      downsample=downsample)
+    if "0.001" not in ds.quantiles or "0.999" not in ds.quantiles:
+        raise ValueError(f"zarr attrs missing image_statistics.quantiles for {zarr_path}")
+    q_low = float(ds.quantiles["0.001"])
+    q_high = float(ds.quantiles["0.999"])
+    zarr_arr = zarr.open_group(str(ds.zarr_path), mode="r")["0"]
+
+    # `max_frames` exists so this can be checked against the pack's own
+    # `predict_video`, which takes the same argument, without paying for a whole
+    # video. It is a test hook, not a tuning knob.
+    n_t = int(ds.image_shape[0])
+    if max_frames is not None:
+        n_t = min(n_t, int(max_frames))
+    target_shape = list(ds.image_shape[1:])
+    voxel_size = tuple(s * d for s, d in zip(ds.scale, downsample))
+    pool_k = pool_kernel_from_um(pool_kernel_um, voxel_size)
+    scale_back = np.asarray(downsample, dtype=np.float64)
+    # Physical size of a full resolution voxel, so the distance gate is in
+    # microns like everything else in this repo. `ds.scale` is already the
+    # downsampled spacing, so divide the downsample factor back out.
+    full_scale = np.asarray(
+        [s / d for s, d in zip(ds.scale, downsample)], dtype=np.float64)
+
+    dev = torch.device(resolve_device(device))
+    ds_arr_t = torch.from_numpy(
+        np.asarray(downsample, dtype=np.float32)).to(dev)
+
+    w = int(window_size)
+    stride = max(w - 1, 1)
+    # Stride w-1 so every consecutive pair falls inside exactly one window.
+    # This is the pack's own scheme, kept identical: a pair scored from two
+    # different windows would get two different U-Net contexts.
+    starts = list(range(0, max(n_t - w + 1, 1), stride))
+    if not starts or starts[-1] + w < n_t:
+        last = max(n_t - w, 0)
+        if not starts or last != starts[-1]:
+            starts.append(last)
+
+    found: dict[int, np.ndarray] = {}
+    # Detections in the downsampled grid, kept because the edge head indexes the
+    # feature map with them. The returned coordinates are scaled back up.
+    found_ds: dict[int, np.ndarray] = {}
+    affinities: dict[int, dict] = {}
+    seen_pairs: set[tuple[int, int]] = set()
+
+    with torch.no_grad():
+        for wi, ws in enumerate(starts):
+            frame_indices = [min(ws + k, n_t - 1) for k in range(w)]
+            imgs = torch.stack([
+                _load_frame(zarr_arr, t, target_shape, downsample)
+                for t in frame_indices
+            ])
+            imgs = ((imgs - q_low) / (q_high - q_low + 1e-6)).clamp(0.0)
+            imgs = imgs.unsqueeze(0).to(dev)
+
+            unet_out, det_logits = model.encode(imgs)
+
+            if det_tta:
+                for dims in [(-1,), (-2,), (-2, -1)]:
+                    _, det_flip = model.encode(imgs.flip(dims))
+                    for f in range(w):
+                        det_logits[f] = det_logits[f] + det_flip[f].flip(dims)
+                    del det_flip
+                for f in range(w):
+                    det_logits[f] = det_logits[f] / 4
+            del imgs
+
+            for f_idx, t in enumerate(frame_indices):
+                if t not in found:
+                    arr = _detect_cells_pooled(
+                        det_logits[f_idx][0], t, det_threshold, pool_k,
+                    )
+                    coords_ds = arr[:, 1:].astype(np.float64)
+                    found_ds[t] = coords_ds
+                    found[t] = coords_ds * scale_back
+
+            for f_idx in range(w - 1):
+                t_src, t_tgt = frame_indices[f_idx], frame_indices[f_idx + 1]
+                if t_src == t_tgt or (t_src, t_tgt) in seen_pairs:
+                    continue
+                seen_pairs.add((t_src, t_tgt))
+                c_src, c_tgt = found_ds[t_src], found_ds[t_tgt]
+                if c_src.shape[0] == 0 or c_tgt.shape[0] == 0:
+                    affinities[t_src] = _empty_affinity()
+                    continue
+
+                probs = _edge_probs(
+                    model, torch, dev, unet_out, f_idx, c_src, c_tgt,
+                    ds_arr_t, w, target_shape, edge_activation,
+                    extract_pos_features,
+                )
+                affinities[t_src] = _gate_candidates(
+                    probs, found[t_src], found[t_tgt], full_scale,
+                    edge_threshold, max_link_um,
+                )
+
+            del unet_out, det_logits
+            if progress_every and (wi + 1) % progress_every == 0:
+                print(f"    window {wi + 1}/{len(starts)}, {len(found)} frames done",
+                      flush=True)
+
+    detections = [found.get(t, np.empty((0, 3), dtype=np.float64))
+                  for t in range(n_t)]
+    aff = [affinities.get(t, _empty_affinity()) for t in range(n_t - 1)]
+    return detections, aff
+
+
+def _empty_affinity() -> dict:
+    return {
+        "i": np.empty(0, dtype=np.int32),
+        "j": np.empty(0, dtype=np.int32),
+        "p": np.empty(0, dtype=np.float32),
+    }
+
+
+def _edge_probs(
+    model, torch, dev, unet_out, f_idx, c_src, c_tgt, ds_arr_t, w,
+    target_shape, edge_activation, extract_pos_features,
+) -> np.ndarray:
+    """The pack's edge head on one consecutive pair. Returns (n_src, n_tgt).
+
+    Every convention here is the pack's and none of it is re-derived. The
+    feature map is indexed with downsampled coordinates, the transformer's own
+    distance term takes full resolution ones, and the positional embedding uses
+    window-relative time normalised by the window rather than the absolute frame
+    index. Getting any of those wrong produces plausible numbers that are
+    quietly wrong, which is the failure mode this module exists to avoid.
+    """
+    n_src, n_tgt = c_src.shape[0], c_tgt.shape[0]
+    p_coords_src = torch.from_numpy(c_src.astype(np.float32)).unsqueeze(0).to(dev)
+    p_coords_tgt = torch.from_numpy(c_tgt.astype(np.float32)).unsqueeze(0).to(dev)
+
+    window_shape = (w,) + tuple(target_shape)
+    src_rel = np.concatenate(
+        [np.full((n_src, 1), f_idx, dtype=np.float64), c_src], axis=1)
+    tgt_rel = np.concatenate(
+        [np.full((n_tgt, 1), f_idx + 1, dtype=np.float64), c_tgt], axis=1)
+    p_pos_src = torch.from_numpy(
+        extract_pos_features(src_rel, window_shape)).unsqueeze(0).to(dev)
+    p_pos_tgt = torch.from_numpy(
+        extract_pos_features(tgt_rel, window_shape)).unsqueeze(0).to(dev)
+
+    m_src = torch.ones(1, n_src, dtype=torch.bool, device=dev)
+    m_tgt = torch.ones(1, n_tgt, dtype=torch.bool, device=dev)
+
+    feat_src = model._index_features(unet_out[:, f_idx], p_coords_src, m_src)
+    feat_tgt = model._index_features(unet_out[:, f_idx + 1], p_coords_tgt, m_tgt)
+    logits = model.predict_edges(
+        feat_src, feat_tgt,
+        p_coords_src * ds_arr_t, p_coords_tgt * ds_arr_t,
+        p_pos_src, p_pos_tgt, m_src, m_tgt,
+    )[0]
+
+    if edge_activation == "softmax":
+        probs = torch.softmax(logits, dim=0)
+    elif edge_activation == "sigmoid":
+        probs = torch.sigmoid(logits)
+    else:
+        raise ValueError(f"unknown edge_activation {edge_activation!r}")
+    return probs.float().cpu().numpy()
+
+
+def _gate_candidates(
+    probs: np.ndarray,
+    a_full: np.ndarray,
+    b_full: np.ndarray,
+    full_scale: np.ndarray,
+    edge_threshold: float,
+    max_link_um: float,
+) -> dict:
+    """Keep pairs above the probability floor and inside the distance gate.
+
+    The distance gate is the same `max_link_um` the distance linker uses, so both
+    linkers choose from the same candidate set and the only thing that differs is
+    how a candidate is scored. Without that the comparison would confound the
+    cost function with the search space.
+    """
+    keep = probs > edge_threshold
+    if not keep.any():
+        return _empty_affinity()
+    ii, jj = np.nonzero(keep)
+    pa = a_full[ii] * full_scale[None, :]
+    pb = b_full[jj] * full_scale[None, :]
+    d = np.linalg.norm(pa - pb, axis=1)
+    near = d <= max_link_um
+    return {
+        "i": ii[near].astype(np.int32),
+        "j": jj[near].astype(np.int32),
+        "p": probs[ii[near], jj[near]].astype(np.float32),
+    }

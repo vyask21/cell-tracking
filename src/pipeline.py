@@ -13,7 +13,7 @@ import time
 
 from src.data import Graph, Image
 from src.detect import detect_sequence
-from src.link import link_sequence
+from src.link import link_sequence, link_sequence_learned
 
 
 def predict_sample(
@@ -29,7 +29,43 @@ def predict_sample(
 
     t0 = time.time()
     backend = str(detect_cfg.get("backend", "localmax"))
-    if backend == "unet":
+    link_backend = str(link_cfg.get("backend", "distance"))
+    if link_backend not in ("distance", "learned"):
+        raise ValueError(f"unknown link.backend {link_backend!r}")
+    if link_backend == "learned" and backend != "unet":
+        raise ValueError(
+            "link.backend 'learned' needs detect.backend 'unet'. The edge scores "
+            "come from the same network pass as the detections, so there is "
+            "nothing to score local-max peaks with."
+        )
+
+    affinities = None
+    if link_backend == "learned":
+        # Detection and edge scoring share one U-Net pass. Running them
+        # separately would double the expensive half for no gain, so this branch
+        # returns both and the detections it returns are the same detections the
+        # detect-only branch below would produce for the same settings.
+        from src.unet import detect_and_score_sequence
+
+        if timepoints is not None:
+            raise ValueError(
+                "the learned linker needs the whole sequence: windows stride by "
+                "window_size - 1 so every consecutive pair is scored exactly "
+                "once, and a subset would silently drop pairs."
+            )
+        detections, affinities = detect_and_score_sequence(
+            zarr_path,
+            det_threshold=float(detect_cfg.get("det_threshold", 0.955)),
+            pool_kernel_um=float(detect_cfg.get("pool_kernel_um", 5.0)),
+            det_tta=bool(detect_cfg.get("det_tta", False)),
+            device=str(detect_cfg.get("device", "cpu")),
+            weights=detect_cfg.get("weights"),
+            edge_activation=str(link_cfg.get("edge_activation", "softmax")),
+            edge_threshold=float(link_cfg.get("edge_threshold", 0.05)),
+            max_link_um=float(link_cfg.get("max_link_um", 7.0)),
+            progress_every=25 if verbose else 0,
+        )
+    elif backend == "unet":
         # The learned detector returns the same contract, a list indexed by t of
         # (N, 3) full-resolution voxel coordinates, so everything downstream is
         # untouched and the detector is the only variable.
@@ -63,12 +99,20 @@ def predict_sample(
     t_detect = time.time() - t0
 
     t0 = time.time()
-    graph = link_sequence(
-        detections,
-        scale_zyx=image.scale,
-        max_link_um=float(link_cfg.get("max_link_um", 7.0)),
-        max_division_um=float(link_cfg.get("max_division_um", 0.0)),
-    )
+    if affinities is not None:
+        graph = link_sequence_learned(
+            detections,
+            affinities,
+            scale_zyx=image.scale,
+            max_division_um=float(link_cfg.get("max_division_um", 0.0)),
+        )
+    else:
+        graph = link_sequence(
+            detections,
+            scale_zyx=image.scale,
+            max_link_um=float(link_cfg.get("max_link_um", 7.0)),
+            max_division_um=float(link_cfg.get("max_division_um", 0.0)),
+        )
     t_link = time.time() - t0
 
     stats = {
@@ -77,6 +121,9 @@ def predict_sample(
         "n_divisions": int(graph.divisions().size),
         "n_frames": len(detections),
         "nodes_per_frame": round(len(graph.nodes) / max(1, len(detections)), 1),
+        # With the learned linker, detect_s covers the shared U-Net pass that
+        # produced both the detections and the edge scores, and link_s is only
+        # the assignment. The two are not comparable across link backends.
         "detect_s": round(t_detect, 2),
         "link_s": round(t_link, 2),
     }

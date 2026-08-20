@@ -144,3 +144,98 @@ def link_sequence(
         ids=ids, t=t_arr, z=zyx[:, 0], y=zyx[:, 1], x=zyx[:, 2]
     )
     return Graph(nodes=nodes, edges=edge_arr)
+
+
+def match_consecutive_learned(
+    n_a: int,
+    n_b: int,
+    affinity: dict,
+) -> list[tuple[int, int]]:
+    """Optimal one-to-one assignment on learned affinity instead of distance.
+
+    Deliberately the same solver, the same drop-after-solve rule and the same
+    candidate set as `match_consecutive`. The only thing that changes is what a
+    pair costs: physical distance there, `-log(p)` here. One variable.
+
+    `-log(p)` rather than `-p` because the assignment sums costs, and summing
+    negative log probabilities maximises the product over the frame pair, which
+    is the quantity the edge head's scores are. Maximising the sum of raw
+    probabilities would prefer one near-certain link plus a hopeless one over
+    two good ones.
+
+    Pairs the affinity never proposed are unreachable rather than expensive, so
+    a detection with no plausible partner ends the track instead of being forced
+    into the least-bad link available.
+    """
+    i, j, p = affinity["i"], affinity["j"], affinity["p"]
+    if n_a == 0 or n_b == 0 or i.size == 0:
+        return []
+
+    # Clipped so a probability that underflows to zero cannot make the cost
+    # matrix non-finite and take the solver with it.
+    cost_val = -np.log(np.clip(p.astype(np.float64), 1e-12, 1.0))
+    big = float(cost_val.max()) * 1000.0 + 1.0
+    cost = np.full((n_a, n_b), big, dtype=np.float64)
+    cost[i, j] = cost_val
+
+    rows, cols = linear_sum_assignment(cost)
+    return [
+        (int(r), int(c)) for r, c in zip(rows, cols) if cost[r, c] < big
+    ]
+
+
+def link_sequence_learned(
+    detections: list[np.ndarray],
+    affinities: list[dict],
+    scale_zyx,
+    max_division_um: float = 0.0,
+) -> Graph:
+    """`link_sequence` with the learned edge head supplying the costs.
+
+    `max_link_um` is absent on purpose: the distance gate was already applied
+    when the candidates were built in `src.unet._gate_candidates`, using the same
+    value, because gating there is what keeps the affinity lists small enough to
+    hold for a whole video.
+
+    Divisions still go through `add_divisions` on distance. The edge head scores
+    pairs, so it has an opinion about which parent a daughter belongs to, but the
+    division term is bounded at 0.02 to 0.04 in NOTES.md and is off in every
+    config, so wiring a second path for it would be untested code in the way.
+    """
+    offsets: list[int] = []
+    next_id = 0
+    for coords in detections:
+        offsets.append(next_id)
+        next_id += coords.shape[0]
+
+    total = next_id
+    ids = np.arange(total, dtype=np.int64)
+    t_arr = np.empty(total, dtype=np.int64)
+    zyx = np.empty((total, 3), dtype=np.float64)
+    for t, coords in enumerate(detections):
+        start, end = offsets[t], offsets[t] + coords.shape[0]
+        t_arr[start:end] = t
+        zyx[start:end] = coords
+
+    if len(affinities) != len(detections) - 1:
+        raise ValueError(
+            f"expected {len(detections) - 1} affinity entries for "
+            f"{len(detections)} frames, got {len(affinities)}"
+        )
+
+    edges: list[tuple[int, int]] = []
+    for t in range(len(detections) - 1):
+        a, b = detections[t], detections[t + 1]
+        matched = match_consecutive_learned(a.shape[0], b.shape[0], affinities[t])
+        pairs = list(matched)
+        pairs += add_divisions(a, b, scale_zyx, matched, max_division_um)
+        for i, j in pairs:
+            edges.append((offsets[t] + i, offsets[t + 1] + j))
+
+    edge_arr = (
+        np.asarray(edges, dtype=np.int64)
+        if edges
+        else np.empty((0, 2), dtype=np.int64)
+    )
+    nodes = Nodes(ids=ids, t=t_arr, z=zyx[:, 0], y=zyx[:, 1], x=zyx[:, 2])
+    return Graph(nodes=nodes, edges=edge_arr)

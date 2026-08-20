@@ -1,0 +1,47 @@
+# One variable against conf/unet50.yaml: the linker's cost function.
+#
+# unet50.yaml links by physical distance, an optimal assignment per frame pair
+# with a 7 um cap. This links by the support pack's own edge head, the
+# cross-attention transformer that scores every (t, t+1) node pair, through the
+# same solver, the same candidate set and the same drop-after-solve rule. The
+# detector settings are identical, so any difference is the cost function.
+#
+# Why this and why now. Exp 4 put the learned detector at node recall 0.995 on
+# the honest 19, which bounds edges lost to missing detections at about 1.0 of
+# the 8.4 percentage points of edge FN. So at least 88% of what is still missing
+# is the linker failing to make a link the detector made possible, against the
+# 12.5% measured at the local-max operating point on 2026-08-18. The linker was
+# closed at an operating point that no longer exists.
+#
+# This is also the prerequisite for the ILP. The pack's ILP solves a global
+# flow over `edge_prob`, so without the edge head there is nothing for it to
+# solve over. Affinity first, then the solver, one variable each.
+name: unet50_edge_link
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  # Identical to conf/unet50.yaml. Do not touch these here; a detector change
+  # belongs in its own config.
+  backend: unet
+  det_threshold: 0.9550
+  pool_kernel_um: 5.0
+  det_tta: false
+  device: auto
+
+link:
+  backend: learned             # distance | learned
+  # Softmax over source nodes per target, which is the pack's default and what
+  # its reported numbers use. `sigmoid` scores each pair independently.
+  edge_activation: softmax
+  # Floor on edge probability before a pair is even a candidate. Deliberately
+  # loose: the assignment is what decides, and a tight floor here would silently
+  # remove the solver's options. The pack's greedy selection uses 0.5 because
+  # greedy has no way to reconsider.
+  edge_threshold: 0.05
+  # Same 7 um gate as every other config, applied when candidates are built, so
+  # both linkers choose from the same set of pairs.
+  max_link_um: 7.0
+  max_division_um: 0.0
