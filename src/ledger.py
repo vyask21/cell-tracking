@@ -74,13 +74,22 @@ def append(
     name: str,
     config: str,
     config_hash: str,
-    cv_mean: float,
-    cv_std: float,
+    cv_mean: float | None,
+    cv_std: float | None,
     folds: int,
     cv_detail: str = "",
     cv_ci: str = "",
     notes: str = "",
 ) -> int:
+    """Log a run.
+
+    `cv_mean` and `cv_std` accept None for a run that has no cross-validation
+    number and cannot have one. That happens with borrowed pretrained weights:
+    the 50-epoch support pack trained on 180 of our 199 videos, so a fold score
+    over all 199 would be scoring its own training data. A blank cell says "no
+    CV" out loud. Putting a held-out subset score in the cv_mean column would
+    read as a CV number to anyone scanning the ledger, including me in a month.
+    """
     rows = _read()
     exp_id = max((int(r["id"]) for r in rows), default=0) + 1
     rows.append(
@@ -91,8 +100,8 @@ def append(
             "name": name,
             "config": config,
             "config_hash": config_hash,
-            "cv_mean": f"{cv_mean:.6f}",
-            "cv_std": f"{cv_std:.6f}",
+            "cv_mean": "" if cv_mean is None else f"{cv_mean:.6f}",
+            "cv_std": "" if cv_std is None else f"{cv_std:.6f}",
             "folds": str(folds),
             "cv_detail": cv_detail,
             "cv_ci": cv_ci,
@@ -137,7 +146,7 @@ def table(limit: int = 20) -> str:
     lines = [head, "-" * len(head)]
     for r in rows[:limit]:
         lines.append(
-            f"{r['id']:>3}  {r['cv_mean']:>10} {r['cv_std']:>8}  "
+            f"{r['id']:>3}  {r['cv_mean'] or 'no cv':>10} {r['cv_std'] or '-':>8}  "
             f"{r['lb_public'] or '-':>10}  {r.get('cv_detail', '') or '-':<28} {r['name']}"
         )
     lines.append("")
