@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 import time
 
+import numpy as np
+
 from src.data import Graph, Image
 from src.detect import detect_sequence
 from src.link import link_sequence, link_sequence_learned
@@ -115,6 +117,29 @@ def predict_sample(
         )
     t_link = time.time() - t0
 
+    if affinities is not None:
+        # Coverage of the candidate set, because `edge_threshold` silently
+        # decides what the assignment is even allowed to consider. A source node
+        # with no candidate cannot be linked at any cost, so this is the number
+        # that says whether the floor is doing harm rather than filtering.
+        n_cand = sum(int(a["i"].size) for a in affinities)
+        src_cov = [
+            float(np.unique(a["i"]).size) / d.shape[0]
+            for a, d in zip(affinities, detections[:-1]) if d.shape[0]
+        ]
+        tgt_cov = [
+            float(np.unique(a["j"]).size) / d.shape[0]
+            for a, d in zip(affinities, detections[1:]) if d.shape[0]
+        ]
+        extra = {
+            "n_candidates": n_cand,
+            "cand_per_node": round(n_cand / max(1, len(graph.nodes)), 2),
+            "src_covered": round(float(np.mean(src_cov)) if src_cov else 0.0, 4),
+            "tgt_covered": round(float(np.mean(tgt_cov)) if tgt_cov else 0.0, 4),
+        }
+    else:
+        extra = {}
+
     stats = {
         "n_nodes": len(graph.nodes),
         "n_edges": int(graph.edges.shape[0]),
@@ -126,6 +151,7 @@ def predict_sample(
         # the assignment. The two are not comparable across link backends.
         "detect_s": round(t_detect, 2),
         "link_s": round(t_link, 2),
+        **extra,
     }
     return graph, stats
 
