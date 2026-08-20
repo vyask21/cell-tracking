@@ -92,3 +92,24 @@ def test_edges_only_ever_step_one_frame_forward():
     t = np.asarray(g.nodes.t)
     for a, b in g.edges:
         assert t[int(b)] - t[int(a)] == 1
+
+
+def test_a_truncated_solve_is_refused_rather_than_returned():
+    """The reason this exception exists, pinned.
+
+    An impossibly small time limit forces truncation. What must not happen is a
+    partial answer coming back looking like a solution: on the largest held-out
+    video a truncated solve scored 0.4196 where the assignment scored 0.6911, so
+    silently accepting one is worse than never having run the solver.
+    """
+    from src.link_ilp import IlpTruncated
+
+    rng = np.random.default_rng(0)
+    frames = [rng.uniform(0, 30, size=(40, 3)) for _ in range(8)]
+    affs = [
+        aff([(i, j, float(rng.uniform(0.05, 0.95)))
+             for i in range(40) for j in range(40)])
+        for _ in range(7)
+    ]
+    with pytest.raises(IlpTruncated, match="refused"):
+        link_sequence_ilp(frames, affs, SCALE, timeout=1e-6)

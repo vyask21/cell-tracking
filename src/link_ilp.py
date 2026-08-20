@@ -36,11 +36,27 @@ from __future__ import annotations
 
 import contextlib
 import io
-import os
+import time
 
 import numpy as np
 
 from src.data import Graph, Nodes
+
+
+class IlpTruncated(RuntimeError):
+    """The solve hit its time limit, so its answer must not be used.
+
+    Measured on `6bba_3abfe10a`, the largest video in the held-out set: solved to
+    optimality the ILP scores 0.7316 against the assignment's 0.6911, and stopped
+    at 600s it scores **0.4196**. A truncated branch-and-bound returns whatever
+    feasible solution it happens to be holding, and a feasible solution to this
+    model can carry far more edges than the optimum, 70,434 against 65,160 here.
+
+    So a time limit is not a safety net unless the caller refuses the result.
+    Accepting a truncated solve is worse than never having run the solver, which
+    is the opposite of how a timeout usually behaves and is why this is an
+    exception rather than a flag on the return value.
+    """
 
 
 def _require_tracksdata():
@@ -85,11 +101,19 @@ def link_sequence_ilp(
 ) -> Graph:
     """Solve one whole video as a single flow problem over the candidate edges.
 
+    Raises `IlpTruncated` when the solve hits `timeout`, rather than returning
+    the partial answer. See that class for why.
+
     `timeout` and `gap` are exposed because this is the one step in the pipeline
     whose cost is not predictable from the input size. A branch-and-bound solve
     can find its answer immediately or grind, and a video that grinds inside a
-    12 hour rerun is a failed submission rather than a slow one. Left at the
-    defaults the solve runs to optimality.
+    12 hour rerun is a failed submission rather than a slow one.
+
+    On `gap`: 0.01 and 0.0 reached the identical solution on the largest video in
+    the held-out set, same 65,160 edges and same score, so a 1% gap costs nothing
+    in quality there. It did not save time on that instance either, so it is not
+    the runtime lever it usually is. The lever is the time budget plus the
+    fallback the caller applies when this raises.
     """
     td, pl = _require_tracksdata()
 
@@ -167,8 +191,22 @@ def link_sequence_ilp(
         gap=gap,
         timeout=timeout,
     )
+    t0 = time.monotonic()
     with _quiet():
         solved = solver.solve(graph)
+    elapsed = time.monotonic() - t0
+
+    # Timing is the detection because the solver does not hand back a status.
+    # The 0.98 allows for the solve stopping fractionally under its own limit.
+    # A second signal agrees and is worth knowing: a truncated solve returned
+    # MORE edges than the assignment it was meant to improve on, where the
+    # optimal one returned fewer.
+    if timeout is not None and elapsed >= 0.98 * timeout:
+        raise IlpTruncated(
+            f"the ILP hit its {timeout:.0f}s limit after {elapsed:.0f}s on a "
+            f"graph of {total} nodes and {len(payload)} candidate edges. Its "
+            "partial answer is worse than not solving at all, so it is refused."
+        )
 
     if solved is None:
         raise RuntimeError(

@@ -43,9 +43,25 @@ link:
   ilp_appearance_weight: 0.1
   ilp_disappearance_weight: 0.1
   ilp_division_weight: 1.0
-  # Branch and bound has no predictable runtime. A video that grinds inside the
-  # 12 hour rerun is a failed submission, not a slow one, so the solve is capped
-  # and the cap is a config value rather than a constant buried in the module.
+  # Branch and bound has no predictable runtime, so the solve is capped and the
+  # cap is a config value rather than a constant buried in the module.
+  #
+  # 600 was the first value here and it was badly wrong. On the two largest
+  # held-out videos the solve was cut off and returned a partial answer, which
+  # scored 0.4196 against the assignment's 0.6911 on 6bba_3abfe10a. Left to
+  # finish, the same solve on the same problem scores 0.7316. A cut-off
+  # branch-and-bound hands back whichever feasible solution it is holding, and a
+  # feasible solution to this model can carry thousands of spurious edges, so a
+  # truncated solve is far worse than never solving.
+  #
+  # Two changes follow. The budget is raised to cover the largest videos seen,
+  # which solved in 568s and needed no gap to do it, and `src.link_ilp` now
+  # refuses a truncated solve rather than returning it, so the pipeline falls
+  # back to the per-frame assignment instead. The budget bounds runtime; the
+  # fallback bounds damage.
   ilp_num_threads: 1
+  # 0.01 and 0.0 reached the identical solution on the largest video, same edges
+  # and same score, and the gap did not save time there either. Kept at 0.0
+  # since it buys nothing on this data.
   ilp_gap: 0.0
-  ilp_timeout_s: 600
+  ilp_timeout_s: 1800

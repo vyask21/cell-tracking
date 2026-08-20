@@ -101,24 +101,44 @@ def predict_sample(
     t_detect = time.time() - t0
 
     t0 = time.time()
+    ilp_fell_back = False
     if link_backend == "ilp":
         # Imported here rather than at module scope so the rerun only needs
         # tracksdata, ilpy and pyscipopt when a config actually asks for the ILP.
-        from src.link_ilp import link_sequence_ilp
+        from src.link_ilp import IlpTruncated, link_sequence_ilp
 
-        graph = link_sequence_ilp(
-            detections,
-            affinities,
-            scale_zyx=image.scale,
-            edge_weight=float(link_cfg.get("ilp_edge_weight", -1.0)),
-            appearance_weight=float(link_cfg.get("ilp_appearance_weight", 0.1)),
-            disappearance_weight=float(link_cfg.get("ilp_disappearance_weight", 0.1)),
-            division_weight=float(link_cfg.get("ilp_division_weight", 1.0)),
-            num_threads=int(link_cfg.get("ilp_num_threads", 1)),
-            gap=float(link_cfg.get("ilp_gap", 0.0)),
-            timeout=(float(link_cfg["ilp_timeout_s"])
-                     if link_cfg.get("ilp_timeout_s") else None),
-        )
+        # A time limit is normally a safe degradation. Here it is the opposite.
+        # On 6bba_3abfe10a the optimal solve scores 0.7316 and the assignment
+        # scores 0.6911, but a solve stopped at 600s scores 0.4196: a truncated
+        # branch-and-bound hands back whichever feasible solution it happens to
+        # hold, and a feasible solution here can carry thousands of spurious
+        # edges. The budget bounds runtime, which the 12 hour rerun needs, and
+        # the fallback bounds damage, which the score needs. Without the second
+        # half the first half is a liability.
+        try:
+            graph = link_sequence_ilp(
+                detections,
+                affinities,
+                scale_zyx=image.scale,
+                edge_weight=float(link_cfg.get("ilp_edge_weight", -1.0)),
+                appearance_weight=float(link_cfg.get("ilp_appearance_weight", 0.1)),
+                disappearance_weight=float(link_cfg.get("ilp_disappearance_weight", 0.1)),
+                division_weight=float(link_cfg.get("ilp_division_weight", 1.0)),
+                num_threads=int(link_cfg.get("ilp_num_threads", 1)),
+                gap=float(link_cfg.get("ilp_gap", 0.0)),
+                timeout=(float(link_cfg["ilp_timeout_s"])
+                         if link_cfg.get("ilp_timeout_s") else None),
+            )
+        except IlpTruncated as exc:
+            print(f"    ILP refused: {exc}", flush=True)
+            print("    falling back to the per-frame assignment.", flush=True)
+            ilp_fell_back = True
+            graph = link_sequence_learned(
+                detections,
+                affinities,
+                scale_zyx=image.scale,
+                max_division_um=float(link_cfg.get("max_division_um", 0.0)),
+            )
     elif affinities is not None:
         graph = link_sequence_learned(
             detections,
@@ -169,6 +189,7 @@ def predict_sample(
         # the assignment. The two are not comparable across link backends.
         "detect_s": round(t_detect, 2),
         "link_s": round(t_link, 2),
+        **({"ilp_fell_back": ilp_fell_back} if link_backend == "ilp" else {}),
         **extra,
     }
     return graph, stats
