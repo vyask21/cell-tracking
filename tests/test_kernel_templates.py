@@ -30,6 +30,8 @@ def test_training_script_parses():
                 epochs=3,
                 batch_size=8,
                 max_iters_arg=max_iters_arg,
+                splits_name="dataset_splits.json",
+                require_disjoint=True,
             )
             ast.parse(code)
 
@@ -54,6 +56,7 @@ def test_the_training_script_installs_the_solver_and_never_seeds_from_the_pack()
     code = kernel.TRAIN_TEMPLATE.format(
         competition=COMPETITION, pack_slug=kernel.PACK_SLUG, split=0,
         epochs=1, batch_size=8, max_iters_arg='[]',
+        splits_name="dataset_splits.json", require_disjoint=True,
     )
     assert "ilpy" in code
 
@@ -71,5 +74,24 @@ def test_the_training_script_installs_the_solver_and_never_seeds_from_the_pack()
 
     # And the fold must refuse to run if it is not actually embryo-disjoint,
     # since the reference trainer's fallback is a seeded 90/10 over all 199.
-    assert "not embryo-disjoint" in code
+    assert "should be embryo-disjoint" in code
     assert "raise SystemExit" in code
+
+
+def test_the_matched_leak_run_may_share_an_embryo_but_never_a_video():
+    """The leak measurement's split 1 shares an embryo deliberately.
+
+    Split 0 trains on 6bba only and split 1 swaps 36 of those videos for 44b6
+    ones, with both evaluated on the same 35 44b6 videos. Sharing the embryo is
+    the variable under test, so the disjointness guard has to be switchable.
+    Sharing a *video* is never acceptable and stays fatal in both.
+    """
+    shared = kernel.TRAIN_TEMPLATE.format(
+        competition=COMPETITION, pack_slug=kernel.PACK_SLUG, split=1,
+        epochs=1, batch_size=4, max_iters_arg='[]',
+        splits_name="leak_splits.json", require_disjoint=False,
+    )
+    ast.parse(shared)
+    assert "leak_splits.json" in shared
+    assert "if False and overlap" in shared
+    assert "in both train and test" in shared

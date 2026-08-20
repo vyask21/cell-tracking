@@ -185,9 +185,10 @@ def stage_dataset(staging: Path, user: str, cfg) -> Path:
         # on both sides and is the exact measurement the retrain exists to
         # avoid. A missing file must therefore be loud, and it is checked for in
         # the training template rather than left to fail quietly here.
-        splits = REPO_ROOT / "data" / "meta" / "dataset_splits.json"
-        if splits.exists():
-            zf.write(splits, "meta/dataset_splits.json")
+        for split_name in ("dataset_splits.json", "leak_splits.json"):
+            splits = REPO_ROOT / "data" / "meta" / split_name
+            if splits.exists():
+                zf.write(splits, f"meta/{split_name}")
 
     (staging / "dataset-metadata.json").write_text(
         json.dumps(
@@ -314,17 +315,20 @@ def find_pack_dir():
     raise SystemExit("support pack not attached: expected " + PACK_SLUG)
 
 
+SPLITS_NAME = "{splits_name}"
+
+
 def find_code_dir():
     for root, dirs, _ in os.walk("/kaggle/input"):
-        if os.path.isfile(os.path.join(root, "meta", "dataset_splits.json")):
+        if os.path.isfile(os.path.join(root, "meta", SPLITS_NAME)):
             return root
         dirs[:] = [d for d in dirs if d != "competitions"]
-    raise SystemExit("code dataset with meta/dataset_splits.json not attached")
+    raise SystemExit("code dataset with meta/" + SPLITS_NAME + " not attached")
 
 
 PACK = find_pack_dir()
 CODE = find_code_dir()
-SPLITS = os.path.join(CODE, "meta", "dataset_splits.json")
+SPLITS = os.path.join(CODE, "meta", SPLITS_NAME)
 print("pack:", PACK, flush=True)
 print("code:", CODE, flush=True)
 
@@ -352,8 +356,17 @@ fold = fold[0]
 train_stems, test_stems = fold["train"], fold["test"]
 emb = lambda n: n.split("_")[0]
 overlap = {{emb(a) for a in train_stems}} & {{emb(b) for b in test_stems}}
-if overlap:
-    raise SystemExit(f"fold {split} is not embryo-disjoint: {{overlap}}")
+leaked_videos = set(train_stems) & set(test_stems)
+if leaked_videos:
+    # Never acceptable under any design: the same video on both sides.
+    raise SystemExit(f"{{len(leaked_videos)}} videos are in both train and test")
+if {require_disjoint} and overlap:
+    # The reference trainer falls back to a seeded 90/10 over all 199 videos when
+    # its splits file is missing, which shares embryos across the split. A run
+    # that silently did that would look fine and measure the wrong thing.
+    raise SystemExit(f"fold {split} should be embryo-disjoint but shares {{overlap}}")
+print(f"fold {split} shares embryos with its test set: {{sorted(overlap)}}",
+      flush=True)
 print(f"fold {split}: {{len(train_stems)}} train videos "
       f"({{sorted({{emb(a) for a in train_stems}})}}), "
       f"{{len(test_stems)}} test ({{sorted({{emb(b) for b in test_stems}})}})",
@@ -417,8 +430,9 @@ for pth in found:
 
 
 def push_train_kernel(staging, user, competition, split, epochs, batch_size,
-                      max_iters):
-    """Push the embryo-disjoint training kernel for one fold."""
+                      max_iters, splits_name="dataset_splits.json",
+                      require_disjoint=True, tag="f"):
+    """Push a training kernel for one fold of one splits file."""
     kdir = staging.parent / "train_kernel"
     if kdir.exists():
         shutil.rmtree(kdir)
@@ -427,7 +441,7 @@ def push_train_kernel(staging, user, competition, split, epochs, batch_size,
     max_iters_arg = (
         f'["--max-iters", "{max_iters}"]' if max_iters else "[]"
     )
-    slug = f"{TRAIN_SLUG}-f{split}"
+    slug = f"{TRAIN_SLUG}-{tag}{split}"
     (kdir / "train.py").write_text(
         TRAIN_TEMPLATE.format(
             competition=competition,
@@ -436,6 +450,8 @@ def push_train_kernel(staging, user, competition, split, epochs, batch_size,
             epochs=epochs,
             batch_size=batch_size,
             max_iters_arg=max_iters_arg,
+            splits_name=splits_name,
+            require_disjoint=bool(require_disjoint),
         ),
         encoding="utf-8",
     )
@@ -477,6 +493,14 @@ def main() -> None:
                     help="leave-one-embryo-out fold: 0 holds out 44b6, 1 holds out 6bba")
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch-size", type=int, default=8)
+    ap.add_argument("--splits-name", default="dataset_splits.json",
+                    help="which splits file in the code dataset to train against")
+    ap.add_argument("--allow-shared-embryo", action="store_true",
+                    help="permit a fold whose train and test share an embryo. "
+                         "Only for the matched leak measurement, where sharing "
+                         "is the variable under test")
+    ap.add_argument("--tag", default="f",
+                    help="kernel slug suffix, so runs do not overwrite each other")
     ap.add_argument("--max-iters", type=int, default=0,
                     help="cap iterations per epoch; use a small value to "
                          "calibrate throughput before spending real GPU hours")
@@ -493,7 +517,8 @@ def main() -> None:
         push_dataset(staging, user, a.message)
         url = push_train_kernel(
             staging, user, competition_, a.split, a.epochs, a.batch_size,
-            a.max_iters,
+            a.max_iters, splits_name=a.splits_name,
+            require_disjoint=not a.allow_shared_embryo, tag=a.tag,
         )
         print(f"\ntraining kernel: {url}")
         return
