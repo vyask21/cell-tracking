@@ -1,0 +1,51 @@
+# One variable against conf/unet50_edge.yaml: the solver.
+#
+# unet50_edge.yaml scores links with the pack's edge head and then solves each
+# frame pair on its own with an optimal assignment. This keeps the identical
+# cost and replaces the solver with the pack's global ILP, which optimises the
+# whole video at once under flow conservation.
+#
+# That difference is the point. A per-frame assignment is optimal inside its
+# pair and blind across pairs, so it cannot use the fact that a link at t makes
+# a link at t+1 more or less plausible. No cost function fixes that; only a
+# global solve does. It is also the remaining structural difference between our
+# 0.804 and the 0.908 the public notebooks reach on these same weights.
+#
+# Divisions: the ILP handles them as a constraint rather than through
+# `add_divisions`, so `max_division_um` does not apply here. `division_weight`
+# is the price of a fork. The pack's default of 1.0 is kept, since the division
+# term is bounded at 0.02 to 0.04 in NOTES.md and this config is not the place
+# to reopen it.
+name: unet50_ilp_link
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  # Identical to conf/unet50.yaml and conf/unet50_edge.yaml.
+  backend: unet
+  det_threshold: 0.9550
+  pool_kernel_um: 5.0
+  det_tta: false
+  device: auto
+
+link:
+  backend: ilp                 # distance | learned | ilp
+  # Identical to conf/unet50_edge.yaml, so the candidate set and its scores are
+  # the same and the solver is the only thing that changes.
+  edge_activation: softmax
+  edge_threshold: 0.05
+  max_link_um: 7.0
+  # The pack's own objective weights, unchanged. Tuning these is a later config
+  # and only after the solver itself is shown to be worth having.
+  ilp_edge_weight: -1.0
+  ilp_appearance_weight: 0.1
+  ilp_disappearance_weight: 0.1
+  ilp_division_weight: 1.0
+  # Branch and bound has no predictable runtime. A video that grinds inside the
+  # 12 hour rerun is a failed submission, not a slow one, so the solve is capped
+  # and the cap is a config value rather than a constant buried in the module.
+  ilp_num_threads: 1
+  ilp_gap: 0.0
+  ilp_timeout_s: 600

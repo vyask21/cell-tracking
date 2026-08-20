@@ -32,9 +32,9 @@ def predict_sample(
     t0 = time.time()
     backend = str(detect_cfg.get("backend", "localmax"))
     link_backend = str(link_cfg.get("backend", "distance"))
-    if link_backend not in ("distance", "learned"):
+    if link_backend not in ("distance", "learned", "ilp"):
         raise ValueError(f"unknown link.backend {link_backend!r}")
-    if link_backend == "learned" and backend != "unet":
+    if link_backend in ("learned", "ilp") and backend != "unet":
         raise ValueError(
             "link.backend 'learned' needs detect.backend 'unet'. The edge scores "
             "come from the same network pass as the detections, so there is "
@@ -42,7 +42,7 @@ def predict_sample(
         )
 
     affinities = None
-    if link_backend == "learned":
+    if link_backend in ("learned", "ilp"):
         # Detection and edge scoring share one U-Net pass. Running them
         # separately would double the expensive half for no gain, so this branch
         # returns both and the detections it returns are the same detections the
@@ -101,7 +101,25 @@ def predict_sample(
     t_detect = time.time() - t0
 
     t0 = time.time()
-    if affinities is not None:
+    if link_backend == "ilp":
+        # Imported here rather than at module scope so the rerun only needs
+        # tracksdata, ilpy and pyscipopt when a config actually asks for the ILP.
+        from src.link_ilp import link_sequence_ilp
+
+        graph = link_sequence_ilp(
+            detections,
+            affinities,
+            scale_zyx=image.scale,
+            edge_weight=float(link_cfg.get("ilp_edge_weight", -1.0)),
+            appearance_weight=float(link_cfg.get("ilp_appearance_weight", 0.1)),
+            disappearance_weight=float(link_cfg.get("ilp_disappearance_weight", 0.1)),
+            division_weight=float(link_cfg.get("ilp_division_weight", 1.0)),
+            num_threads=int(link_cfg.get("ilp_num_threads", 1)),
+            gap=float(link_cfg.get("ilp_gap", 0.0)),
+            timeout=(float(link_cfg["ilp_timeout_s"])
+                     if link_cfg.get("ilp_timeout_s") else None),
+        )
+    elif affinities is not None:
         graph = link_sequence_learned(
             detections,
             affinities,
