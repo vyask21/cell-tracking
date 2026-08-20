@@ -363,6 +363,13 @@ import torch
 print("cuda:", torch.cuda.is_available(), torch.cuda.get_device_name(0)
       if torch.cuda.is_available() else "", flush=True)
 
+# `--single-gpu` is deliberately NOT passed. Kaggle's T4 allocation reports
+# "visible CUDA GPUs: 2" and the trainer will split the UNet across both with
+# DataParallel, which both halves the step time and halves per-GPU memory. The
+# first calibration passed --single-gpu and died at iteration 3 with a CUDA OOM
+# at batch 8: 4.00 GiB requested against 3.29 GiB free on the one GPU it was
+# using. Batch size is also lowered, since the OOM had headroom of well under a
+# factor of two.
 sys.argv = [
     "train_unet_transformer.py",
     "--data-dir", DATA,
@@ -374,7 +381,6 @@ sys.argv = [
     "--window-size", "2",
     "--downsample", "1,4,4",
     "--pool-kernel-um", "5.0",
-    "--single-gpu",
 ] + ({max_iters_arg})
 
 t0 = time.time()
