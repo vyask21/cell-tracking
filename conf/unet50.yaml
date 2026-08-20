@@ -32,7 +32,6 @@ detect:
   # four times coarser in Z, so a Z-flipped volume is out of distribution.
   det_tta: false
   device: cpu                  # cuda in a Kaggle notebook
-  weights: external/pack50/weights/unet_transformer/split_0/edge_predictor_best.pth
 
 link:
   # Unchanged from conf/baseline.yaml. The 7 um cap is on node-to-node matching,

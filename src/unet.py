@@ -32,8 +32,24 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PACK_DIR = REPO_ROOT / "external" / "pack50"
-DEFAULT_WEIGHTS = PACK_DIR / "weights" / "unet_transformer" / "split_0" / "edge_predictor_best.pth"
+WEIGHTS_REL = Path("weights") / "unet_transformer" / "split_0" / "edge_predictor_best.pth"
+
+
+def pack_dir() -> Path:
+    """Where the support pack lives.
+
+    Locally it is `external/pack50`. In a Kaggle notebook it is an attached
+    dataset whose mount path Kaggle has moved between conventions, so the kernel
+    template sets `CELLMOT_PACK_DIR` after locating it. Never hard-code a mount.
+    """
+    env = os.environ.get("CELLMOT_PACK_DIR")
+    if env:
+        return Path(env)
+    return REPO_ROOT / "external" / "pack50"
+
+
+def default_weights() -> Path:
+    return pack_dir() / WEIGHTS_REL
 
 
 def _ensure_pack_on_path() -> None:
@@ -43,14 +59,15 @@ def _ensure_pack_on_path() -> None:
     but holds the loader, the frame reader and the peak extractor, so both
     directories are needed.
     """
-    src = PACK_DIR / "repo" / "src"
-    scripts = PACK_DIR / "repo" / "scripts"
+    pack = pack_dir()
+    src = pack / "repo" / "src"
+    scripts = pack / "repo" / "scripts"
     if not src.exists() or not scripts.exists():
         raise RuntimeError(
             "support pack missing. Run:\n"
             "  kaggle datasets download srcA/biohub-tracking-support-pack-50ep-v1 "
             "-p external/pack50 --unzip\n"
-            f"expected it at {PACK_DIR}"
+            f"expected it at {pack}"
         )
     for path in (str(src), str(scripts)):
         if path not in sys.path:
@@ -67,7 +84,9 @@ def load_detector(weights: str | os.PathLike | None = None, device: str = "cpu")
     import torch
     from predict_unet_transformer import load_model
 
-    weights_path = Path(weights) if weights else DEFAULT_WEIGHTS
+    weights_path = Path(weights) if weights else default_weights()
+    if not weights_path.is_absolute() and not weights_path.exists():
+        weights_path = default_weights()
     if not weights_path.exists():
         raise FileNotFoundError(f"no weights at {weights_path}")
     model, window_size, downsample = load_model(weights_path, torch.device(device))
