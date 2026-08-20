@@ -248,7 +248,15 @@ def push_kernel(staging: Path, user: str, cfg, competition: str) -> str:
         encoding="utf-8",
     )
 
-    r = _kaggle("kernels", "push", "-p", str(kdir))
+    # `enable_gpu` alone gets a P100, and this competition refuses to accept a
+    # submission from a P100 notebook ("Your Notebook cannot use P100 GPUs in
+    # this competition"). The accelerator is not a metadata field, so it has to
+    # be passed on the push. Valid values: NvidiaTeslaT4, NvidiaTeslaP100,
+    # Tpu1VmV38.
+    push_args = ["kernels", "push", "-p", str(kdir)]
+    if _is_unet(cfg):
+        push_args += ["--accelerator", "NvidiaTeslaT4"]
+    r = _kaggle(*push_args)
     print((r.stdout or r.stderr).strip())
     if r.returncode != 0:
         raise SystemExit("kernel push failed")
