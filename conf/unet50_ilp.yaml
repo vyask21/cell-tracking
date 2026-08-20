@@ -65,3 +65,13 @@ link:
   # since it buys nothing on this data.
   ilp_gap: 0.0
   ilp_timeout_s: 1800
+  # Global wall-clock budget for linking across the whole run, which the
+  # per-video cap does not provide: 200 videos each allowed 1800s is 100 hours.
+  # Measured on Kaggle at 24s detect and a link cost scaling as nodes^1.79, the
+  # held-out node distribution projects about 5.9h for 200 videos, while the four
+  # example datasets, which happen to average 1.74x more nodes, project 12.6h and
+  # would blow the 12 hour ceiling. Rather than bet on which distribution the
+  # hidden set follows, this guarantees the notebook finishes: once the budget is
+  # spent the rest link with the assignment, which costs 0.0182 rather than the
+  # whole submission.
+  ilp_total_budget_s: 28800

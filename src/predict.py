@@ -49,8 +49,35 @@ def run(
     graphs = {}
     empty = []
     failed = []
+    # A global wall-clock budget for the expensive linker, separate from the
+    # per-video one in link_ilp. A per-video cap bounds the worst video; it does
+    # not bound the run. 200 videos each allowed 600s is 34 hours, so a per-video
+    # cap alone can still walk a notebook past the 12 hour ceiling, and a rerun
+    # that runs out of time scores nothing at all. Once this budget is spent the
+    # remaining videos link with the per-frame assignment, which on the held-out
+    # 19 costs 0.0182 rather than costing the whole submission.
+    link_cfg = cfg.link or {}
+    ilp_budget_s = float(link_cfg.get("ilp_total_budget_s", 0) or 0)
+    watching_budget = ilp_budget_s > 0 and str(link_cfg.get("backend", "")) == "ilp"
+    downgraded = 0
+
     t0 = time.time()
     for i, sample in enumerate(samples, 1):
+        if watching_budget and time.time() - t0 > ilp_budget_s:
+            link_cfg["backend"] = "learned"
+            watching_budget = False
+            print(
+                "",
+                flush=True,
+            )
+            print(
+                f"  BUDGET: {ilp_budget_s / 3600:.1f}h of linking spent after "
+                f"{i - 1} samples. The remaining {len(samples) - i + 1} link "
+                "with the assignment so the notebook finishes.",
+                flush=True,
+            )
+        if ilp_budget_s and str(link_cfg.get("backend", "")) == "learned":
+            downgraded += 1
         # One bad sample out of roughly 200 must not cost the whole rerun. The
         # traceback is printed in full so a failure is diagnosable from the Kaggle
         # log, and the sample still reaches the CSV as a placeholder below.
@@ -102,6 +129,9 @@ def run(
         )
     print(f"\nwrote {rows} rows for {len(samples)} datasets to {out}")
     print(f"verified all {len(samples)} datasets present")
+    if downgraded:
+        print(f"{downgraded} of {len(samples)} samples linked without the ILP "
+              "because the linking time budget ran out.")
     print(f"total {(time.time() - t0) / 60:.1f} min")
     return out
 
