@@ -222,8 +222,18 @@ def _is_unet(cfg) -> bool:
     return str((cfg.detect or {}).get("backend", "localmax")) == "unet"
 
 
-def push_kernel(staging: Path, user: str, cfg, competition: str) -> str:
-    kdir = staging.parent / "kernel"
+def push_kernel(staging: Path, user: str, cfg, competition: str,
+                tag: str = "") -> str:
+    """Push the inference kernel, optionally under a suffixed slug.
+
+    One fixed slug means a second config overwrites the first, so measuring three
+    arms costs three sequential runs plus three waits. A suffix lets them run at
+    once, which matters because a code competition scores the rerun rather than
+    the notebook and the turnaround is hours. The suffix is part of the slug, so
+    each arm keeps its own version history and its own logs.
+    """
+    slug = f"{KERNEL_SLUG}-{tag}" if tag else KERNEL_SLUG
+    kdir = staging.parent / ("kernel-" + tag if tag else "kernel")
     if kdir.exists():
         shutil.rmtree(kdir)
     kdir.mkdir(parents=True)
@@ -245,8 +255,8 @@ def push_kernel(staging: Path, user: str, cfg, competition: str) -> str:
     (kdir / "kernel-metadata.json").write_text(
         json.dumps(
             {
-                "id": f"{user}/{KERNEL_SLUG}",
-                "title": KERNEL_SLUG,
+                "id": f"{user}/{slug}",
+                "title": slug,
                 "code_file": "inference.py",
                 "language": "python",
                 "kernel_type": "script",
@@ -281,7 +291,7 @@ def push_kernel(staging: Path, user: str, cfg, competition: str) -> str:
     print((r.stdout or r.stderr).strip())
     if r.returncode != 0:
         raise SystemExit("kernel push failed")
-    return f"https://www.kaggle.com/code/{user}/{KERNEL_SLUG}"
+    return f"https://www.kaggle.com/code/{user}/{slug}"
 
 
 
@@ -527,7 +537,12 @@ def main() -> None:
                          "Only for the matched leak measurement, where sharing "
                          "is the variable under test")
     ap.add_argument("--tag", default="f",
-                    help="kernel slug suffix, so runs do not overwrite each other")
+                    help="training kernel slug suffix, so runs do not overwrite "
+                         "each other")
+    ap.add_argument("--kernel-tag", default="",
+                    help="inference kernel slug suffix, so several arms can run "
+                         "at once. Empty keeps the original slug, which is what "
+                         "every submission before 2026-08-27 used")
     ap.add_argument("--max-iters", type=int, default=0,
                     help="cap iterations per epoch; use a small value to "
                          "calibrate throughput before spending real GPU hours")
@@ -561,7 +576,7 @@ def main() -> None:
     staging = Path(REPO_ROOT) / "artifacts" / "kaggle" / "dataset"
     stage_dataset(staging, user, cfg)
     push_dataset(staging, user, a.message)
-    url = push_kernel(staging, user, cfg, competition)
+    url = push_kernel(staging, user, cfg, competition, tag=a.kernel_tag)
 
     print(f"\nnotebook: {url}")
     print(
