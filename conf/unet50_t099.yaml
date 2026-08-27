@@ -1,0 +1,46 @@
+# One variable against conf/unet50_ilp.yaml: the detection threshold.
+#
+# 0.955 was chosen when the learned detector was wired in and never revisited.
+# Reading the public code on 2026-08-27 showed the notebooks in the 0.92 band
+# run 0.96875 to 0.99, and our held-out total_node_ratio at 0.955 is about
+# +0.22, meaning 22% more nodes than the organisers' estimate. The adjusted
+# Jaccard charges 0.1 of that ratio directly, so roughly 2.2% of the score is
+# being paid for detections the metric never uses.
+#
+# This config exists mainly so the calibration chain in conf/unet50_calib.yaml
+# is a one-variable change against something with a leaderboard score. The
+# calibration screen of 2026-08-20 was run on a cache built at 0.99, so its
+# `base` arm is this config and nothing else. Submitting the chain without also
+# submitting its own base would confound the threshold with the chain.
+#
+# Local, weighted over the pack's held-out 19: adj_J 0.8394, against 0.8388 for
+# conf/unet50_ilp.yaml on the same samples. That difference is well inside the
+# noise, so the expectation here is a flat leaderboard, and a flat result is the
+# useful one: it says the threshold is not the lever and the chain gets the
+# credit it measures.
+name: unet50_ilp_t099
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  backend: unet
+  det_threshold: 0.9900       # was 0.9550
+  pool_kernel_um: 5.0
+  det_tta: false
+  device: auto
+
+link:
+  backend: ilp
+  edge_activation: softmax
+  edge_threshold: 0.05
+  max_link_um: 7.0
+  ilp_edge_weight: -1.0
+  ilp_appearance_weight: 0.1
+  ilp_disappearance_weight: 0.1
+  ilp_division_weight: 1.0
+  ilp_num_threads: 1
+  ilp_gap: 0.0
+  ilp_timeout_s: 1800
+  ilp_total_budget_s: 28800

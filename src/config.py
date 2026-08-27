@@ -48,6 +48,7 @@ class Config:
     cv: dict[str, Any] = field(default_factory=dict)
     detect: dict[str, Any] = field(default_factory=dict)
     link: dict[str, Any] = field(default_factory=dict)
+    calibrate: dict[str, Any] = field(default_factory=dict)
     model: dict[str, Any] = field(default_factory=dict)
     train: dict[str, Any] = field(default_factory=dict)
     path: Path | None = None
@@ -95,7 +96,7 @@ class Config:
 def load_config(path: str | Path) -> Config:
     path = Path(path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    known = {"name", "seed", "cv", "detect", "link", "model", "train"}
+    known = {"name", "seed", "cv", "detect", "link", "calibrate", "model", "train"}
     unknown = set(raw) - known
     if unknown:
         raise ValueError(f"unknown config keys in {path}: {sorted(unknown)}")

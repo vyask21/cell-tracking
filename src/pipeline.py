@@ -155,6 +155,24 @@ def predict_sample(
         )
     t_link = time.time() - t0
 
+    # Graph calibration. Off unless a config asks for it, so every earlier
+    # experiment reproduces byte for byte. `src.postprocess` imports only numpy
+    # and `src.data`, so this stays inside the rerun's dependency budget.
+    #
+    # The gate matters here and is easy to get wrong. `link.max_link_um` decides
+    # which candidate edges the solver is allowed to see; `calibrate.max_edge_um`
+    # decides which of the edges it chose survive. Screening on 2026-08-20 ran
+    # the two at the same value, so a config that widens one and not the other is
+    # measuring something the screen never covered.
+    calib_cfg = cfg.calibrate or {}
+    t0 = time.time()
+    calib_stats: dict = {}
+    if calib_cfg.get("enabled", False):
+        from src.postprocess import calibrate
+
+        graph, calib_stats = calibrate(graph, image.scale, calib_cfg)
+    t_calibrate = time.time() - t0
+
     if affinities is not None:
         # Coverage of the candidate set, because `edge_threshold` silently
         # decides what the assignment is even allowed to consider. A source node
@@ -189,6 +207,8 @@ def predict_sample(
         # the assignment. The two are not comparable across link backends.
         "detect_s": round(t_detect, 2),
         "link_s": round(t_link, 2),
+        **({"calibrate_s": round(t_calibrate, 2)} if calib_cfg.get("enabled", False) else {}),
+        **{f"calib_{k}": v for k, v in calib_stats.items()},
         **({"ilp_fell_back": ilp_fell_back} if link_backend == "ilp" else {}),
         **extra,
     }

@@ -1,0 +1,84 @@
+# One variable against conf/unet50_t099.yaml: the graph calibration chain.
+#
+# This is the `all` arm of the 2026-08-20 calibration screen, moved into the
+# production path unchanged. The screen ran eight arms over the pack's held-out
+# 19 from one cache, so every arm shares detections, affinities and, where the
+# gate matches, the ILP solve itself. Weighted adjusted Jaccard:
+#
+#     base (this config's parent)   0.8394
+#     edge cap 14 um                0.8459   +0.0065  [-0.0015, +0.0157]
+#     prune isolated                0.8646   +0.0252  [+0.0199, +0.0307]
+#     short track filter, min 6     0.8821   +0.0427  [+0.0317, +0.0550]
+#     gap close                     0.8584   +0.0190  [+0.0141, +0.0246]
+#     line fit smoothing            0.8720   +0.0327  [+0.0260, +0.0387]
+#     all of the above              0.8975   +0.0581  [+0.0501, +0.0681]
+#
+# Paired bootstrap, 20k resamples. Every arm except the edge cap has an interval
+# clear of zero and every arm is positive on both embryos. The edge cap is kept
+# in this config because the screened `all` arm contains it, not because it was
+# shown to help on its own; by this repo's rule it is inconclusive alone.
+#
+# The combined arm improves true positives, false positives and false negatives
+# at the same time, 12378 / 710 / 497 against 11927 / 956 / 948. Every earlier
+# change in this competition traded one of those against another.
+#
+# Settings come from the public notebooks at 0.902 and 0.926, which run the same
+# support pack weights and the same ILP objective we do and differ almost
+# entirely in what they do to the graph afterwards. The implementation is ours
+# and each step was screened separately here; the numbers are theirs. Full
+# citation in NOTES.md.
+#
+# Caveat that belongs next to the number, not in a footnote: the 19 are
+# video-disjoint from the pack's training set but not embryo-disjoint, and the
+# hidden test is. Exp 4 saw a local +0.1270 arrive as +0.0200 on the
+# leaderboard. Treat +0.0581 as a direction and an upper bound.
+name: unet50_ilp_calib
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  backend: unet
+  det_threshold: 0.9900
+  pool_kernel_um: 5.0
+  det_tta: false
+  device: auto
+
+link:
+  backend: ilp
+  edge_activation: softmax
+  edge_threshold: 0.05
+  # Widened from 7.0 to match the screened arm. This is the candidate gate, so
+  # it decides what the solver may choose from. The edge head's softmax runs
+  # over the full dense score matrix before any gating, so a candidate's
+  # probability does not depend on this value and widening the gate only adds
+  # options. That is what makes the screen, which built one cache at 20 um and
+  # narrowed it per arm, equal to computing at 14 um directly.
+  max_link_um: 14.0
+  ilp_edge_weight: -1.0
+  ilp_appearance_weight: 0.1
+  ilp_disappearance_weight: 0.1
+  ilp_division_weight: 1.0
+  ilp_num_threads: 1
+  ilp_gap: 0.0
+  ilp_timeout_s: 1800
+  ilp_total_budget_s: 28800
+
+calibrate:
+  enabled: true
+  # Applied to the edges the solver chose, at the same value as the candidate
+  # gate above. Running the two at different values would measure something the
+  # screen never covered.
+  max_edge_um: 14.0
+  single_parent: true
+  gap_close: true
+  gap_close_um: 6.0
+  gap_reuse_um: 3.2
+  gap_max_added_frac: 0.05
+  gap_max_added_abs: 2000
+  prune_isolated: true
+  min_track_len: 6
+  linefit_smooth: true
+  linefit_weight: 0.8
+  linefit_window: 2
