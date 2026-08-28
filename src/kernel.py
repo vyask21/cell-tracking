@@ -288,9 +288,15 @@ def push_kernel(staging: Path, user: str, cfg, competition: str,
     if _is_unet(cfg):
         push_args += ["--accelerator", "NvidiaTeslaT4"]
     r = _kaggle(*push_args)
-    print((r.stdout or r.stderr).strip())
-    if r.returncode != 0:
-        raise SystemExit("kernel push failed")
+    out = (r.stdout or "") + (r.stderr or "")
+    print(out.strip())
+    # The CLI exits 0 on a refused push and reports the reason on stdout, so
+    # the return code alone is not enough. This was found on 2026-08-28, when
+    # "Maximum batch GPU session count of 2 reached" was printed and the pusher
+    # then went on to print a notebook URL for a kernel that did not exist.
+    # A push that failed must look like a failure.
+    if r.returncode != 0 or "error" in out.lower():
+        raise SystemExit(f"kernel push failed: {out.strip() or 'no output'}")
     return f"https://www.kaggle.com/code/{user}/{slug}"
 
 
