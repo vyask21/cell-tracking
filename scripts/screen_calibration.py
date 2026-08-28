@@ -243,12 +243,20 @@ def main() -> None:
         for rows in results.values():
             w.writerows(rows)
 
-    if "base" in results:
+    # The reference is the first arm run, not an arm that happens to be called
+    # "base". Hardcoding the name meant a screen whose arms were named anything
+    # else printed its per-arm scores and silently no statistics at all, which is
+    # how the 2026-08-28 objective screen finished with no interval on any of its
+    # three deltas. A screen that cannot say whether a delta clears the noise has
+    # not measured anything.
+    if len(results) > 1:
+        ref_name = next(iter(results))
         print(f"\n{'arm':14}{'adj J':>9}{'delta':>10}{'95% CI':>22}{'P(>0)':>8}"
               f"{'both embryos':>14}")
-        base = results["base"]
+        print(f"(reference arm: {ref_name})")
+        base = results[ref_name]
         for arm, rows in results.items():
-            if arm == "base":
+            if arm == ref_name:
                 print(f"{arm:14}{weighted(rows):>9.4f}{'':>10}{'':>22}{'':>8}")
                 continue
             d, lo, hi, p = paired_bootstrap(base, rows)
