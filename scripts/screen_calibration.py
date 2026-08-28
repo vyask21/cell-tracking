@@ -48,11 +48,52 @@ ARMS: dict[str, dict] = {
                    "min_track_len": 6},
     "all": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
             "min_track_len": 6, "linefit_smooth": True},
+    # Objective arms, all on top of `all` because that is the submission
+    # candidate and a weight change has to be judged against what we would ship.
+    # The public 0.927 notebook runs appearance 0.0 with disappearance 1.5; these
+    # separate the two so the one-variable rule survives, and keep the combined
+    # arm so an interaction has somewhere to show up.
+    "all_app0": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                 "min_track_len": 6, "linefit_smooth": True,
+                 "ilp": {"appearance_weight": 0.0}},
+    "all_disapp15": {"max_edge_um": 14.0, "prune_isolated": True,
+                     "gap_close": True, "min_track_len": 6,
+                     "linefit_smooth": True,
+                     "ilp": {"disappearance_weight": 1.5}},
+    "all_both": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                 "min_track_len": 6, "linefit_smooth": True,
+                 "ilp": {"appearance_weight": 0.0,
+                         "disappearance_weight": 1.5}},
+}
+
+# The pack's objective, and the value every arm uses unless it says otherwise.
+# The public 0.927 notebook runs appearance 0.0 and disappearance 1.5 against
+# these, which is the change these arms exist to test.
+DEFAULT_ILP: dict[str, float] = {
+    "edge_weight": -1.0,
+    "appearance_weight": 0.1,
+    "disappearance_weight": 0.1,
+    "division_weight": 1.0,
 }
 
 FIELDS = ["arm", "sample", "embryo", "edge_tp", "edge_fp", "edge_fn",
           "num_pred_nodes", "node_recall", "total_node_ratio", "edge_jaccard",
           "adj_edge_jaccard", "seconds"]
+
+
+def ilp_key(ilp_cfg: dict) -> str:
+    """Directory suffix for a solve, covering every weight the solve depends on.
+
+    The first version of this keyed the cached solve on the candidate gate alone.
+    That was correct only while every arm solved with the same objective. The
+    moment an arm changes a weight, a gate-only key hands back the solve from a
+    different objective and the arm reports no change, which reads as a clean
+    negative result rather than as a cache collision. The key now covers the
+    weights, so a new objective gets a new directory.
+    """
+    d = DEFAULT_ILP | dict(ilp_cfg)
+    parts = [f"{k}{d[k]:g}" for k in sorted(DEFAULT_ILP)]
+    return "_".join(parts)
 
 
 def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
@@ -91,7 +132,14 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
     # gate turns eight solves into two.
     from src.data import Graph, Nodes
 
-    solve_dir = os.path.join(cache_dir, f"ilp_gate{gate:g}")
+    solve_dir = os.path.join(cache_dir, f"ilp_gate{gate:g}_{ilp_key(ilp_cfg)}")
+    legacy_dir = os.path.join(cache_dir, f"ilp_gate{gate:g}")
+    if (not os.path.exists(os.path.join(solve_dir, sample + ".npz"))
+            and ilp_key(ilp_cfg) == ilp_key({})
+            and os.path.exists(os.path.join(legacy_dir, sample + ".npz"))):
+        # Solves cached before the key covered the objective were all at the
+        # pack defaults, so they are reusable, but only under that exact key.
+        solve_dir = legacy_dir
     os.makedirs(solve_dir, exist_ok=True)
     solved_path = os.path.join(solve_dir, sample + ".npz")
     if os.path.exists(solved_path):
@@ -101,12 +149,13 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
             edges=z["edges"],
         )
     else:
+        w = DEFAULT_ILP | dict(ilp_cfg)
         graph = link_sequence_ilp(
             detections, narrowed, scale,
-            edge_weight=float(ilp_cfg.get("edge_weight", -1.0)),
-            appearance_weight=float(ilp_cfg.get("appearance_weight", 0.1)),
-            disappearance_weight=float(ilp_cfg.get("disappearance_weight", 0.1)),
-            division_weight=float(ilp_cfg.get("division_weight", 1.0)),
+            edge_weight=float(w["edge_weight"]),
+            appearance_weight=float(w["appearance_weight"]),
+            disappearance_weight=float(w["disappearance_weight"]),
+            division_weight=float(w["division_weight"]),
             num_threads=1, gap=0.0, timeout=1800.0,
         )
         tmp = solved_path + ".tmp.npz"
@@ -167,10 +216,12 @@ def main() -> None:
 
     print(f"{len(arms)} arms x {len(HELDOUT)} samples, cache {args.cache}\n",
           flush=True)
-    ilp_cfg: dict = {}
     results: dict[str, list[dict]] = {}
     t0 = time.time()
     for arm, cfg in arms.items():
+        # An arm's "ilp" block is the objective; everything else is calibration.
+        ilp_cfg = dict(cfg.get("ilp", {}))
+        cfg = {k: v for k, v in cfg.items() if k != "ilp"}
         rows: list[dict] = []
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             futs = [pool.submit(run_one, arm, cfg, s, args.cache, args.data,
