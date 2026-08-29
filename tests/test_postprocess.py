@@ -188,3 +188,170 @@ def test_gaps_close_before_short_tracks_are_filtered():
     })
     assert len(out.nodes) == 8
     assert stats["short_track_nodes_removed"] == 0
+
+
+# --- safe divisions ---------------------------------------------------------
+#
+# The public notebook that ships this records that its own purely geometric
+# version produced hundreds of forks and not one true positive. The three
+# structural constraints are what make it work, so each gets a test that shows it
+# rejecting on its own, not just a happy path that passes.
+
+from src.postprocess import add_safe_divisions  # noqa: E402
+
+UM = 0.40625  # one voxel in y or x
+
+
+def division_scene(
+    parent_has_predecessor=True,
+    sister_gap_vox=4,
+    diverge=True,
+    orphan_extra=(),
+):
+    """A parent at t1 with one child, plus an orphan that should become the second.
+
+    Laid out in y only, so every distance is voxels * 0.40625 um and the
+    thresholds are easy to reason about. Node order: predecessor, parent, child,
+    orphan, child successor, orphan successor.
+    """
+    ts, zyx, edges = [], [], []
+
+    def add(t, y):
+        ts.append(t)
+        zyx.append([0.0, float(y), 0.0])
+        return len(ts) - 1
+
+    pred = add(0, 0)
+    parent = add(1, 0)
+    child = add(2, 0)
+    orphan = add(2, sister_gap_vox)
+    spread = sister_gap_vox + (12 if diverge else 0)
+    c_next = add(3, 0)
+    o_next = add(3, spread)
+
+    if parent_has_predecessor:
+        edges.append((pred, parent))
+    edges.append((parent, child))
+    edges.append((child, c_next))
+    edges.append((orphan, o_next))
+    for y in orphan_extra:
+        add(2, y)
+    return make(ts, zyx, edges), parent, orphan
+
+
+def test_a_clean_division_is_added():
+    g, parent, orphan = division_scene()
+    st = {}
+    out = add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=1.0,
+                             stats=st)
+    assert st["safe_div_added"] == 1
+    assert (parent, orphan) in {tuple(e) for e in out.edges}
+    assert parent in set(out.divisions().tolist())
+
+
+def test_a_track_start_is_never_given_a_second_child():
+    """Constraint 1. Identical geometry, parent simply has no predecessor."""
+    g, _, _ = division_scene(parent_has_predecessor=False)
+    st = {}
+    add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=1.0, stats=st)
+    assert st["safe_div_added"] == 0
+
+
+def test_a_pair_that_does_not_diverge_is_rejected():
+    """Constraint 3, the discriminator. Sisters stay the same distance apart."""
+    g, _, _ = division_scene(diverge=False)
+    st = {}
+    add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=1.0, stats=st)
+    assert st["safe_div_added"] == 0
+
+
+def test_an_orphan_nearer_another_orphan_than_the_child_is_rejected():
+    """Constraint 2. A closer orphan wins the mutual-nearest test, and it fails
+    the divergence check, so nothing is added rather than the wrong thing."""
+    g, _, _ = division_scene(sister_gap_vox=8, orphan_extra=(1,))
+    st = {}
+    add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=1.0, stats=st)
+    assert st["safe_div_added"] == 0
+
+
+def test_a_sister_beyond_the_cap_is_rejected():
+    # 40 voxels is 16.25 um, over the 11 um sister cap.
+    g, _, _ = division_scene(sister_gap_vox=40)
+    st = {}
+    add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=1.0, stats=st)
+    assert st["safe_div_added"] == 0
+
+
+def test_both_caps_floor_at_one_rather_than_at_zero():
+    """A zero fraction still permits exactly one, and that is deliberate.
+
+    Both caps are `max(1, round(frac * size))`, matching the public
+    implementation. The floor means a small graph is never silently barred from
+    every division by rounding, and it means a fraction cannot be used as an
+    off switch. `safe_divisions: false` is the off switch.
+    """
+    g, _, _ = division_scene()
+    st = {}
+    add_safe_divisions(g, SCALE, frame_frac_cap=0.0, global_frac_cap=0.0, stats=st)
+    assert st["safe_div_added"] == 1
+
+
+def test_the_global_cap_bounds_a_graph_with_several_candidates():
+    """Two independent divisions, a cap that admits one."""
+    ts, zyx, edges = [], [], []
+
+    def add(t, y):
+        ts.append(t); zyx.append([0.0, float(y), 0.0]); return len(ts) - 1
+
+    for base in (0, 100):
+        pred = add(0, base)
+        parent = add(1, base)
+        child = add(2, base)
+        orphan = add(2, base + 4)
+        c2 = add(3, base)
+        o2 = add(3, base + 16)
+        edges += [(pred, parent), (parent, child), (child, c2), (orphan, o2)]
+    g = make(ts, zyx, edges)
+
+    both = {}
+    add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=1.0, stats=both)
+    assert both["safe_div_added"] == 2
+
+    capped = {}
+    add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=0.13,
+                       stats=capped)
+    assert capped["safe_div_added"] == 1
+    assert capped["safe_div_global_capped"] == 1
+
+
+def test_an_orphan_is_claimed_by_at_most_one_parent():
+    """Two parents, one orphan between them. Only one fork may be created."""
+    ts, zyx, edges = [], [], []
+
+    def add(t, y):
+        ts.append(t); zyx.append([0.0, float(y), 0.0]); return len(ts) - 1
+
+    pa, pb = add(0, 0), add(0, 8)
+    a, b = add(1, 0), add(1, 8)
+    ca, cb = add(2, 0), add(2, 8)
+    orphan = add(2, 4)
+    ca2, cb2 = add(3, 0), add(3, 8)
+    o2 = add(3, 20)
+    edges += [(pa, a), (pb, b), (a, ca), (b, cb), (ca, ca2), (cb, cb2),
+              (orphan, o2)]
+    g = make(ts, zyx, edges)
+    st = {}
+    out = add_safe_divisions(g, SCALE, frame_frac_cap=1.0, global_frac_cap=1.0,
+                             stats=st)
+    into_orphan = [e for e in out.edges if int(e[1]) == orphan]
+    assert len(into_orphan) <= 1
+
+
+def test_calibrate_leaves_divisions_off_unless_asked():
+    g, _, _ = division_scene()
+    off, _ = calibrate(g, SCALE, {"max_edge_um": 14.0})
+    assert off.divisions().size == 0
+    on, st = calibrate(g, SCALE, {"max_edge_um": 14.0, "safe_divisions": True,
+                                  "safe_div_frame_frac": 1.0,
+                                  "safe_div_global_frac": 1.0})
+    assert on.divisions().size == 1

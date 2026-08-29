@@ -48,6 +48,28 @@ ARMS: dict[str, dict] = {
                    "min_track_len": 6},
     "all": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
             "min_track_len": 6, "linefit_smooth": True},
+    # Divisions. `all` forfeits the whole 0.1 term by construction, so this is
+    # the first arm in the competition that can score on it at all.
+    "all_div": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                "min_track_len": 6, "linefit_smooth": True,
+                "safe_divisions": True},
+    # The 0.926 notebook runs much tighter geometry than the 0.927 one: parent
+    # 4.7 and sister 7.2 against 8.0 and 11.0. With 43 false divisions against 3
+    # true at the loose setting, tighter is the obvious direction to test.
+    "all_div_tight": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                "min_track_len": 6, "linefit_smooth": True,
+                "safe_divisions": True,
+                      "safe_div_parent_um": 4.7, "safe_div_sister_um": 7.2},
+    # Divergence is the discriminator, so raising it is the other lever that
+    # attacks false positives without touching how near a sister must be.
+    "all_div_div4": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                "min_track_len": 6, "linefit_smooth": True,
+                "safe_divisions": True, "safe_div_divergence_um": 4.0},
+    "all_div_both": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                "min_track_len": 6, "linefit_smooth": True,
+                "safe_divisions": True,
+                     "safe_div_parent_um": 4.7, "safe_div_sister_um": 7.2,
+                     "safe_div_divergence_um": 4.0},
     # Objective arms, all on top of `all` because that is the submission
     # candidate and a weight change has to be judged against what we would ship.
     # The public 0.927 notebook runs appearance 0.0 with disappearance 1.5; these
@@ -77,6 +99,7 @@ DEFAULT_ILP: dict[str, float] = {
 }
 
 FIELDS = ["arm", "sample", "embryo", "edge_tp", "edge_fp", "edge_fn",
+          "division_tp", "division_fp", "division_fn",
           "num_pred_nodes", "node_recall", "total_node_ratio", "edge_jaccard",
           "adj_edge_jaccard", "seconds"]
 
@@ -174,6 +197,8 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
     return {
         "arm": arm, "sample": sample, "embryo": sample.split("_")[0],
         "edge_tp": s.edge_tp, "edge_fp": s.edge_fp, "edge_fn": s.edge_fn,
+        "division_tp": s.division_tp, "division_fp": s.division_fp,
+        "division_fn": s.division_fn,
         "num_pred_nodes": s.num_pred_nodes, "node_recall": s.node_recall,
         "total_node_ratio": s.total_node_ratio, "edge_jaccard": s.edge_jaccard,
         "adj_edge_jaccard": s.adj_edge_jaccard,
@@ -188,14 +213,41 @@ def weighted(rows: list[dict], key: str = "adj_edge_jaccard") -> float:
     return float(np.sum(v * w) / np.sum(w))
 
 
+def division_jaccard(rows: list[dict]) -> float:
+    """Micro-averaged over pooled counts, which is how the organisers compute it.
+
+    Not a weighted mean of per-sample division Jaccards. Divisions are rare
+    enough that most samples have a denominator of a handful or of zero, so
+    averaging per sample would let a sample with one division and one hit count
+    as much as a sample with thirty. `NOTES.md` records the distinction; this is
+    the code that has to honour it.
+    """
+    tp = sum(int(r["division_tp"]) for r in rows)
+    fp = sum(int(r["division_fp"]) for r in rows)
+    fn = sum(int(r["division_fn"]) for r in rows)
+    den = tp + fp + fn
+    return float(tp) / den if den else 0.0
+
+
+def total_score(rows: list[dict]) -> float:
+    """The competition metric: weighted adjusted edge Jaccard plus 0.1 division.
+
+    The screen reported only the edge term until 2026-08-29, which was fine while
+    every arm forfeited divisions identically and useless the moment an arm
+    started adding them.
+    """
+    return weighted(rows) + 0.1 * division_jaccard(rows)
+
+
 def paired_bootstrap(a: list[dict], b: list[dict], n: int = 20000, seed: int = 0):
     """Paired because both arms ran the same samples from the same cache."""
     rng = np.random.default_rng(seed)
     idx = [rng.choice(len(a), len(a), replace=True) for _ in range(n)]
-    boot = np.array([weighted([b[i] for i in ix]) - weighted([a[i] for i in ix])
+    boot = np.array([total_score([b[i] for i in ix]) - total_score([a[i] for i in ix])
                      for ix in idx])
     lo, hi = np.percentile(boot, [2.5, 97.5])
-    return weighted(b) - weighted(a), float(lo), float(hi), float((boot > 0).mean())
+    return (total_score(b) - total_score(a), float(lo), float(hi),
+            float((boot > 0).mean()))
 
 
 def main() -> None:
@@ -230,7 +282,12 @@ def main() -> None:
                 rows.append(f.result())
         rows.sort(key=lambda r: r["sample"])
         results[arm] = rows
-        print(f"  {arm:12} adj_J {weighted(rows):.4f}  "
+        print(f"  {arm:12} score {total_score(rows):.4f}  "
+              f"adj_J {weighted(rows):.4f}  "
+              f"divJ {division_jaccard(rows):.4f} "
+              f"({sum(int(r['division_tp']) for r in rows)}tp/"
+              f"{sum(int(r['division_fp']) for r in rows)}fp/"
+              f"{sum(int(r['division_fn']) for r in rows)}fn)  "
               f"nodes {sum(int(r['num_pred_nodes']) for r in rows):8d}  "
               f"tp {sum(int(r['edge_tp']) for r in rows):6d}  "
               f"fp {sum(int(r['edge_fp']) for r in rows):5d}  "
@@ -257,16 +314,16 @@ def main() -> None:
         base = results[ref_name]
         for arm, rows in results.items():
             if arm == ref_name:
-                print(f"{arm:14}{weighted(rows):>9.4f}{'':>10}{'':>22}{'':>8}")
+                print(f"{arm:14}{total_score(rows):>9.4f}{'':>10}{'':>22}{'':>8}")
                 continue
             d, lo, hi, p = paired_bootstrap(base, rows)
             per = []
             for emb in ("44b6", "6bba"):
                 a = [r for r in base if r["embryo"] == emb]
                 b = [r for r in rows if r["embryo"] == emb]
-                per.append(weighted(b) - weighted(a))
+                per.append(total_score(b) - total_score(a))
             both = "yes" if all(x > 0 for x in per) else "no"
-            print(f"{arm:14}{weighted(rows):>9.4f}{d:>+10.4f}"
+            print(f"{arm:14}{total_score(rows):>9.4f}{d:>+10.4f}"
                   f"{f'[{lo:+.4f}, {hi:+.4f}]':>22}{p:>8.3f}{both:>14}")
 
     print("\nThe 19 are video-disjoint from the pack's training set but NOT "

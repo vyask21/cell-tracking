@@ -22,19 +22,25 @@ The steps, in the order they must run:
 4. `filter_short_tracks`  whole components shorter than a minimum are mostly
    false positives, and they cost twice: their edges are FP and their nodes
    inflate the node-count ratio.
-5. `linefit_smooth`  move each node toward a line fitted through its temporal
+5. `add_safe_divisions`  give a node a second child where the geometry and the
+   two daughters' subsequent divergence both say a mitosis happened. This is the
+   only step that touches the division term, which a one-to-one linker forfeits
+   entirely.
+6. `linefit_smooth`  move each node toward a line fitted through its temporal
    neighbours. The metric matches predictions to ground truth by distance with a
    7 um cap, so moving a node a micron closer can flip it from unmatched to
    matched, and matching is what edges are scored on.
 
-Divisions are deliberately absent. They are bounded at 0.02 to 0.04 in NOTES.md
-and every config here keeps them off; adding them belongs in its own experiment
-after the rest is settled.
+Divisions were deliberately absent until 2026-08-29 and are now behind
+`safe_divisions`, off by default. The bound of 0.02 to 0.04 in NOTES.md still
+stands as the ceiling; what changed is that the rest is settled and the term is
+worth 0.1 of the available 1.1, which no submission of ours has ever scored on.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from src.data import Graph, Nodes
 
@@ -391,6 +397,164 @@ def linefit_smooth(
     return Graph(nodes=nodes, edges=graph.edges)
 
 
+def add_safe_divisions(
+    graph: Graph,
+    scale,
+    max_parent_um: float = 8.0,
+    max_sister_um: float = 11.0,
+    max_existing_child_um: float = 10.0,
+    min_divergence_um: float = 2.25,
+    sister_score_weight: float = 0.15,
+    frame_frac_cap: float = 0.0076,
+    global_frac_cap: float = 0.00375,
+    stats: dict | None = None,
+) -> Graph:
+    """Give a node a second child where the geometry says a division happened.
+
+    Why this exists at all. The division term is 0.1 of the available 1.1 and a
+    one-to-one linker scores exactly 0.000 on it by construction, because no node
+    can ever have two outgoing edges. Every submission this repo has made forfeits
+    the whole term before the tracker sees an image.
+
+    Why it is not simply "fork the nearest orphan". The public notebook that
+    ships this records that its own geometric version, using the same distances,
+    the same score and the same caps as below, produced hundreds of forks and
+    never a single true positive. Distance alone cannot tell a division from a
+    detection that happens to sit near a track. Three structural constraints are
+    what make it work, and all three are here:
+
+    1. **The parent must be mid-track.** A node with no predecessor is a track
+       start, and a track start acquiring two children is far more likely to be a
+       detection error than a mitosis.
+    2. **The sisters must be mutual nearest orphans.** The candidate has to be the
+       nearest unclaimed node to the existing child, not merely near the parent.
+       This is what stops one dense region donating orphans to every track in it.
+    3. **The pair must diverge.** Both daughters must themselves continue to t+2,
+       and the distance between those successors must exceed the sisters' own
+       separation by `min_divergence_um`. Post-mitotic sisters move apart; two
+       detections of one cell do not. This is the discriminator, and it is the one
+       a purely per-frame rule cannot express.
+
+    Caps are fractions rather than counts because videos differ twentyfold in
+    cell density. The score `parent_dist + 0.15 * sister_dist` ranks proposals so
+    that the cap keeps the most confident ones.
+
+    Runs before the short-track filter, matching the public chain: a division edge
+    attaches an orphan to an existing component, which makes that component larger
+    and so less likely to be filtered.
+    """
+    st = stats if stats is not None else {}
+    st.setdefault("safe_div_proposals", 0)
+    st.setdefault("safe_div_added", 0)
+    st.setdefault("safe_div_frame_capped", 0)
+    st.setdefault("safe_div_global_capped", 0)
+
+    n = len(graph.nodes)
+    if n == 0 or graph.edges.shape[0] == 0:
+        return graph
+
+    edges = graph.edges
+    t_arr = np.asarray(graph.nodes.t)
+    zyx = np.stack([graph.nodes.z, graph.nodes.y, graph.nodes.x], axis=1)
+    pos = _physical(zyx, scale)
+
+    out_deg = np.bincount(edges[:, 0], minlength=n)
+    in_deg = np.bincount(edges[:, 1], minlength=n)
+
+    # The single successor of every node that has exactly one. -1 elsewhere.
+    succ = -np.ones(n, dtype=np.int64)
+    single = out_deg[edges[:, 0]] == 1
+    succ[edges[single, 0]] = edges[single, 1]
+
+    order = np.argsort(t_arr, kind="stable")
+    t_sorted = t_arr[order]
+    uniq, starts = np.unique(t_sorted, return_index=True)
+    bounds = list(starts) + [len(order)]
+    by_t = {int(tv): order[bounds[k]:bounds[k + 1]] for k, tv in enumerate(uniq)}
+
+    global_cap = max(1, int(round(edges.shape[0] * global_frac_cap)))
+    claimed: set[int] = set()
+    added: list[tuple[int, int]] = []
+
+    for t in sorted(by_t):
+        nxt = by_t.get(t + 1)
+        if nxt is None:
+            continue
+        here = by_t[t]
+
+        # Constraint 1: exactly one child, and a predecessor of its own.
+        sources = here[(out_deg[here] == 1) & (in_deg[here] >= 1)]
+        orphans = nxt[in_deg[nxt] == 0]
+        orphans = np.array([o for o in orphans if int(o) not in claimed],
+                           dtype=np.int64)
+        if sources.size == 0 or orphans.size == 0:
+            continue
+
+        tree = cKDTree(pos[orphans])
+        frame_cap = max(1, int(round(sources.size * frame_frac_cap)))
+        proposals: list[tuple[float, int, int]] = []
+
+        for s in sources:
+            c1 = int(succ[s])
+            if c1 < 0 or int(t_arr[c1]) != t + 1:
+                continue
+            if np.linalg.norm(pos[s] - pos[c1]) > max_existing_child_um:
+                continue
+
+            # Constraint 2: the candidate must be the existing child's nearest
+            # orphan, so a crowded region cannot donate one orphan to many tracks.
+            d_mn, i_mn = tree.query(pos[c1])
+            if d_mn > max_sister_um:
+                continue
+            cand = int(orphans[int(i_mn)])
+            if cand in claimed:
+                continue
+
+            parent_dist = float(np.linalg.norm(pos[s] - pos[cand]))
+            if parent_dist > max_parent_um:
+                continue
+            sister_dist = float(np.linalg.norm(pos[c1] - pos[cand]))
+            if sister_dist > max_sister_um:
+                continue
+
+            # Constraint 3: both daughters continue and separate.
+            s1, s2 = int(succ[c1]), int(succ[cand])
+            if s1 < 0 or s2 < 0:
+                continue
+            if int(t_arr[s1]) != t + 2 or int(t_arr[s2]) != t + 2:
+                continue
+            if float(np.linalg.norm(pos[s1] - pos[s2])) - sister_dist < min_divergence_um:
+                continue
+
+            proposals.append(
+                (parent_dist + sister_score_weight * sister_dist, int(s), cand)
+            )
+
+        st["safe_div_proposals"] += len(proposals)
+        proposals.sort()
+        taken = 0
+        for _, s, cand in proposals:
+            if len(added) >= global_cap:
+                st["safe_div_global_capped"] += 1
+                break
+            if taken >= frame_cap:
+                st["safe_div_frame_capped"] += 1
+                break
+            if cand in claimed:
+                continue
+            added.append((s, cand))
+            claimed.add(cand)
+            taken += 1
+
+    st["safe_div_added"] = len(added)
+    if not added:
+        return graph
+    return Graph(
+        nodes=graph.nodes,
+        edges=np.concatenate([edges, np.array(added, dtype=np.int64)], axis=0),
+    )
+
+
 def calibrate(graph: Graph, scale, cfg: dict | None = None) -> tuple[Graph, dict]:
     """Run the enabled steps in the only order that makes sense.
 
@@ -417,6 +581,20 @@ def calibrate(graph: Graph, scale, cfg: dict | None = None) -> tuple[Graph, dict
             reuse_um=float(cfg.get("gap_reuse_um", 3.2)),
             max_added_frac=float(cfg.get("gap_max_added_frac", 0.05)),
             max_added_abs=int(cfg.get("gap_max_added_abs", 2000)),
+            stats=stats,
+        )
+    if cfg.get("safe_divisions", False):
+        # Before the short-track filter and before smoothing, matching the public
+        # chain. A division edge attaches an orphan to an existing component, so
+        # running it first makes that component larger and less likely to be cut.
+        g = add_safe_divisions(
+            g, scale,
+            max_parent_um=float(cfg.get("safe_div_parent_um", 8.0)),
+            max_sister_um=float(cfg.get("safe_div_sister_um", 11.0)),
+            max_existing_child_um=float(cfg.get("safe_div_child_um", 10.0)),
+            min_divergence_um=float(cfg.get("safe_div_divergence_um", 2.25)),
+            frame_frac_cap=float(cfg.get("safe_div_frame_frac", 0.0076)),
+            global_frac_cap=float(cfg.get("safe_div_global_frac", 0.00375)),
             stats=stats,
         )
     if cfg.get("prune_isolated", False):
