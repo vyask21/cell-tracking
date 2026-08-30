@@ -53,6 +53,35 @@ ARMS: dict[str, dict] = {
     "all_div": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
                 "min_track_len": 6, "linefit_smooth": True,
                 "safe_divisions": True},
+    # Gap radius. The public notebook's effective one-frame gap radius is
+    # GAP_CLOSE_UM * (gap + 1) = 5.8 * 2 = 11.6 um; ours is a flat 6.0. Its
+    # GAP_CLOSE_MAX_GAP of 2 is dead config, clamped by
+    # `effective_gap_max = min(GAP_CLOSE_MAX_GAP, 1)`, and its separate gap-2
+    # recovery path is off. So the radius is the real difference, not the span.
+    "all_gap8":   {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                "min_track_len": 6, "linefit_smooth": True, "gap_close_um": 8.0},
+    "all_gap116": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
+                "min_track_len": 6, "linefit_smooth": True, "gap_close_um": 11.6},
+    "all_gap14":  {"max_edge_um": 14.0, "prune_isolated": True,
+                "min_track_len": 6, "linefit_smooth": True, "gap_close": True, "gap_close_um": 14.0},
+    # The radius curve is monotonically decreasing from 6.0 upward, so the
+    # optimum may be below where it was set. `all_nogap` is the control that says
+    # whether the step is worth having at all inside the finished chain, which
+    # the original screen only established on top of `prune`.
+    "all_gap5":   {"max_edge_um": 14.0, "prune_isolated": True,
+                "min_track_len": 6, "linefit_smooth": True, "gap_close": True, "gap_close_um": 5.0},
+    "all_gap4":   {"max_edge_um": 14.0, "prune_isolated": True,
+                "min_track_len": 6, "linefit_smooth": True, "gap_close": True, "gap_close_um": 4.0},
+    # The two believed changes together, to check they do not interact. Gap
+    # closing and safe divisions both compete for the same unlinked detections,
+    # so a tighter gap radius leaves more orphans for the division rule and the
+    # combination is not guaranteed to be the sum.
+    "all_div_gap5": {"max_edge_um": 14.0, "prune_isolated": True,
+                     "gap_close": True, "gap_close_um": 5.0,
+                     "min_track_len": 6, "linefit_smooth": True,
+                     "safe_divisions": True, "safe_div_divergence_um": 4.0},
+    "all_nogap":  {"max_edge_um": 14.0, "prune_isolated": True,
+                "min_track_len": 6, "linefit_smooth": True, "gap_close": False},
     # The 0.926 notebook runs much tighter geometry than the 0.927 one: parent
     # 4.7 and sister 7.2 against 8.0 and 11.0. With 43 false divisions against 3
     # true at the loose setting, tighter is the obvious direction to test.
