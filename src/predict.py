@@ -29,6 +29,48 @@ from src.data import list_samples, verify_submission, write_submission
 from src.pipeline import predict_sample
 
 
+def _missing_dir_report(test_dir: str, root: str = "/kaggle/input") -> str:
+    """Explain a missing test directory by listing what is actually mounted.
+
+    A bare FileNotFoundError from os.listdir cost three round trips on the calib
+    kernel of 2026-08-28. The cause was a Kaggle kernel record that listed the
+    competition as a source and never mounted it, which looks identical in the
+    log to a metadata mistake on our side. The two are distinguishable in one
+    glance if the failure prints the mount, so it prints the mount. Two levels
+    is enough: the competition folder and its train/test children.
+    """
+    lines = [f"test directory not found: {test_dir}"]
+    if not os.path.isdir(root):
+        lines.append(f"{root} does not exist either, so this is not a Kaggle rerun")
+        return "\n".join(lines)
+
+    lines.append(f"what is actually under {root}:")
+    try:
+        entries = sorted(os.listdir(root))
+    except OSError as exc:
+        lines.append(f"  unreadable: {exc}")
+        return "\n".join(lines)
+
+    if not entries:
+        lines.append("  nothing, no sources are attached to this kernel")
+    for name in entries:
+        child = os.path.join(root, name)
+        if not os.path.isdir(child):
+            lines.append(f"  {name}")
+            continue
+        lines.append(f"  {name}/")
+        try:
+            sub = sorted(os.listdir(child))
+        except OSError as exc:
+            lines.append(f"    unreadable: {exc}")
+            continue
+        for item in sub[:20]:
+            lines.append(f"    {item}")
+        if len(sub) > 20:
+            lines.append(f"    ... and {len(sub) - 20} more")
+    return "\n".join(lines)
+
+
 def run(
     config_path: str,
     exp_id: int | None = None,
@@ -38,6 +80,9 @@ def run(
 ) -> str:
     cfg = load_config(config_path)
     test_dir = data_dir or str(cfg.test_dir)
+
+    if not os.path.isdir(test_dir):
+        raise SystemExit(_missing_dir_report(test_dir))
 
     samples = list_samples(test_dir, require_geff=False)
     if not samples:
