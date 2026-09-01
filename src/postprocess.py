@@ -288,6 +288,97 @@ def filter_short_tracks(
     return _subset(graph, keep_node, st)
 
 
+def filter_short_branches(
+    graph: Graph,
+    min_len: int = 0,
+    stats: dict | None = None,
+) -> Graph:
+    """Delete short dangling branches, which the component filter cannot reach.
+
+    `filter_short_tracks` works on weakly connected components, and that is a
+    blunt instrument once the graph has any forks in it. A spurious three-node
+    chain hanging off a two-hundred-node track is part of a two-hundred-and-three
+    node component, so no component threshold will ever remove it, and it is
+    exactly the junk the node-count term charges for: `adj_J` compares our total
+    node count against the organisers' estimate with no upper cap on the reward
+    for coming in under it.
+
+    So this splits the graph into tracklets, maximal chains that do not pass
+    through a fork or a merge, and removes the ones that dangle. A tracklet is
+    removed when it is shorter than `min_len` and at least one of its two ends is
+    free, meaning the chain starts with no parent or ends with no child. An
+    internal tracklet, one that bridges a fork to a merge, is never removed
+    however short it is, because removing it would cut a track in half and turn
+    one edge error into two.
+
+    Iterated to a fixed point: deleting a dangling branch can leave its parent
+    dangling in turn, and one pass would stop after the first layer.
+
+    Runs before `add_safe_divisions` on purpose. The division rule proposes forks
+    out of unclaimed nodes, and a spurious dangling branch is a supply of exactly
+    those, so cleaning first both removes nodes and improves what the division
+    rule has to choose from.
+    """
+    st = stats if stats is not None else {}
+    st.setdefault("short_branch_nodes_removed", 0)
+    st.setdefault("short_branch_passes", 0)
+    if min_len <= 1 or len(graph.nodes) == 0 or graph.edges.shape[0] == 0:
+        return graph
+
+    g = graph
+    for _ in range(20):
+        n = len(g.nodes)
+        edges = g.edges
+        if edges.shape[0] == 0:
+            break
+        out_deg = np.bincount(edges[:, 0], minlength=n)
+        in_deg = np.bincount(edges[:, 1], minlength=n)
+
+        # The single successor of each node that has exactly one, so a chain can
+        # be walked without building an adjacency list.
+        succ = -np.ones(n, dtype=np.int64)
+        one_out = out_deg[edges[:, 0]] == 1
+        succ[edges[one_out, 0]] = edges[one_out, 1]
+
+        # A tracklet starts at a node whose parent does not hand it off cleanly:
+        # no parent at all, or a parent that forks.
+        # A node begins a tracklet when it has no parent or several. Note what
+        # is NOT here: a node with one parent and no child is a track END, and
+        # listing it as a start makes every track's last node its own one-node
+        # tracklet, which is dangling by definition. The first version did that
+        # and deleted the entire graph one layer per pass.
+        starts = np.flatnonzero((in_deg == 0) | (in_deg > 1))
+        parent_forks = np.zeros(n, dtype=bool)
+        multi = out_deg[edges[:, 0]] > 1
+        parent_forks[edges[multi, 1]] = True
+        starts = np.unique(np.concatenate([starts, np.flatnonzero(parent_forks)]))
+
+        drop = np.zeros(n, dtype=bool)
+        for s0 in starts:
+            chain = [int(s0)]
+            cur = int(s0)
+            while True:
+                nx = int(succ[cur])
+                if nx < 0 or in_deg[nx] != 1:
+                    break
+                chain.append(nx)
+                cur = nx
+            if len(chain) >= min_len:
+                continue
+            head_free = in_deg[chain[0]] == 0
+            tail_free = out_deg[chain[-1]] == 0
+            if head_free or tail_free:
+                drop[chain] = True
+
+        if not drop.any():
+            break
+        st["short_branch_passes"] += 1
+        st["short_branch_nodes_removed"] += int(drop.sum())
+        g = _subset(g, ~drop, st)
+
+    return g
+
+
 def prune_isolated(graph: Graph, stats: dict | None = None) -> Graph:
     """Drop nodes that no edge touches.
 
@@ -407,6 +498,10 @@ def add_safe_divisions(
     sister_score_weight: float = 0.15,
     frame_frac_cap: float = 0.0076,
     global_frac_cap: float = 0.00375,
+    max_daughter_cos: float = 1.0,
+    min_symmetry: float = 0.0,
+    max_sister_rel: float = 0.0,
+    min_child_len: int = 1,
     stats: dict | None = None,
 ) -> Graph:
     """Give a node a second child where the geometry says a division happened.
@@ -442,6 +537,30 @@ def add_safe_divisions(
     Runs before the short-track filter, matching the public chain: a division edge
     attaches an orphan to an existing component, which makes that component larger
     and so less likely to be filtered.
+
+    **Four further gates, all off by default [2026-08-31].** The first screen of
+    this rule returned 3 true divisions against 30 false ones on the held-out 19,
+    and on that ratio precision is worth about three times what recall is: killing
+    all 30 false positives takes the division Jaccard from 0.061 to 0.158, while
+    converting one more of the 16 misses takes it to 0.082. The gates above are
+    all distances, and distance cannot separate the dominant failure mode, which
+    is a neighbouring cell whose own link to its own parent was missed. That cell
+    sits near the track, continues normally and diverges, so it passes every
+    existing test. What it does not do is sit opposite its supposed sister.
+
+    - `max_daughter_cos`  cosine between the two parent-to-daughter directions.
+      A real mitosis pushes daughters apart from a shared origin, so the angle at
+      the parent is obtuse and the cosine negative. An unlinked neighbour lies off
+      to one side of the real child, giving a cosine near +1. 1.0 disables it.
+    - `min_symmetry`  ratio of the shorter to the longer parent-to-daughter
+      distance. A parent sits near the midpoint of its own daughters; it does not
+      sit near the midpoint of its child and an unrelated neighbour. 0.0 disables.
+    - `max_sister_rel`  sister separation as a multiple of the median
+      nearest-neighbour distance in the target frame. The videos differ
+      twentyfold in cell density, so a flat 11 um is tight in one and meaningless
+      in another. 0.0 disables it.
+    - `min_child_len`  how many frames past the fork both daughters must survive.
+      1 is the existing behaviour, both reaching t+2.
     """
     st = stats if stats is not None else {}
     st.setdefault("safe_div_proposals", 0)
@@ -476,6 +595,16 @@ def add_safe_divisions(
     claimed: set[int] = set()
     added: list[tuple[int, int]] = []
 
+    def survives(node: int, frames: int) -> bool:
+        """Does this node's chain of single successors run `frames` further on?"""
+        cur = int(node)
+        for _ in range(frames):
+            nx = int(succ[cur])
+            if nx < 0 or int(t_arr[nx]) != int(t_arr[cur]) + 1:
+                return False
+            cur = nx
+        return True
+
     for t in sorted(by_t):
         nxt = by_t.get(t + 1)
         if nxt is None:
@@ -492,6 +621,16 @@ def add_safe_divisions(
 
         tree = cKDTree(pos[orphans])
         frame_cap = max(1, int(round(sources.size * frame_frac_cap)))
+
+        # Local density, used only when `max_sister_rel` is on. The median
+        # nearest-neighbour distance over every node in the target frame is the
+        # natural unit for "are these two closer than two unrelated cells would
+        # be", and it is what makes one setting work across videos that differ
+        # twentyfold in cell count.
+        sister_cap_rel = np.inf
+        if max_sister_rel > 0.0 and nxt.size > 2:
+            nn_d, _ = cKDTree(pos[nxt]).query(pos[nxt], k=2)
+            sister_cap_rel = max_sister_rel * float(np.median(nn_d[:, 1]))
         proposals: list[tuple[float, int, int]] = []
 
         for s in sources:
@@ -516,6 +655,24 @@ def add_safe_divisions(
             sister_dist = float(np.linalg.norm(pos[c1] - pos[cand]))
             if sister_dist > max_sister_um:
                 continue
+            if sister_dist > sister_cap_rel:
+                continue
+
+            # Symmetry about the parent. Both gates read the same geometry from
+            # different directions: the angle subtended at the parent, and how
+            # unequal the two arms are. A mitosis is symmetric in both senses and
+            # a missed link to a neighbouring cell is symmetric in neither.
+            if max_daughter_cos < 1.0 or min_symmetry > 0.0:
+                v1, v2 = pos[c1] - pos[s], pos[cand] - pos[s]
+                d1, d2 = float(np.linalg.norm(v1)), float(np.linalg.norm(v2))
+                if d1 <= 0.0 or d2 <= 0.0:
+                    continue
+                if max_daughter_cos < 1.0:
+                    if float(np.dot(v1, v2)) / (d1 * d2) > max_daughter_cos:
+                        continue
+                if min_symmetry > 0.0:
+                    if min(d1, d2) / max(d1, d2) < min_symmetry:
+                        continue
 
             # Constraint 3: both daughters continue and separate.
             s1, s2 = int(succ[c1]), int(succ[cand])
@@ -525,6 +682,9 @@ def add_safe_divisions(
                 continue
             if float(np.linalg.norm(pos[s1] - pos[s2])) - sister_dist < min_divergence_um:
                 continue
+            if min_child_len > 1:
+                if not (survives(c1, min_child_len) and survives(cand, min_child_len)):
+                    continue
 
             proposals.append(
                 (parent_dist + sister_score_weight * sister_dist, int(s), cand)
@@ -583,6 +743,8 @@ def calibrate(graph: Graph, scale, cfg: dict | None = None) -> tuple[Graph, dict
             max_added_abs=int(cfg.get("gap_max_added_abs", 2000)),
             stats=stats,
         )
+    if cfg.get("min_branch_len", 0):
+        g = filter_short_branches(g, int(cfg["min_branch_len"]), stats=stats)
     if cfg.get("safe_divisions", False):
         # Before the short-track filter and before smoothing, matching the public
         # chain. A division edge attaches an orphan to an existing component, so
@@ -595,6 +757,10 @@ def calibrate(graph: Graph, scale, cfg: dict | None = None) -> tuple[Graph, dict
             min_divergence_um=float(cfg.get("safe_div_divergence_um", 2.25)),
             frame_frac_cap=float(cfg.get("safe_div_frame_frac", 0.0076)),
             global_frac_cap=float(cfg.get("safe_div_global_frac", 0.00375)),
+            max_daughter_cos=float(cfg.get("safe_div_max_cos", 1.0)),
+            min_symmetry=float(cfg.get("safe_div_min_symmetry", 0.0)),
+            max_sister_rel=float(cfg.get("safe_div_sister_rel", 0.0)),
+            min_child_len=int(cfg.get("safe_div_child_len", 1)),
             stats=stats,
         )
     if cfg.get("prune_isolated", False):

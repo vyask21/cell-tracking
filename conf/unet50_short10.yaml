@@ -1,0 +1,101 @@
+# One variable against conf/unet50_calib_div_gap5.yaml: the short-track filter,
+# min_track_len 6 to 10.
+#
+# The 6 came from the public 0.927 notebook and this repo inherited it without
+# ever screening it as a value. Re-screened 2026-08-31 over the pack's held-out
+# 19, one variable at a time against the shipped config, which has a leaderboard
+# score of 0.878 behind it:
+#
+#   min_track_len   total    delta        95% CI              P(>0)  both embryos
+#   4               0.8975   -0.0067  [-0.0096, -0.0043]      0.000   no
+#   5               0.9010   -0.0033  [-0.0057, -0.0015]      0.000   no
+#   6 (shipped)     0.9043
+#   7               0.9067   +0.0024  [+0.0010, +0.0040]      1.000   YES
+#   8               0.9090   +0.0048  [+0.0031, +0.0068]      1.000   YES
+#   10              0.9125   +0.0082  [+0.0042, +0.0125]      1.000   YES
+#   12              0.9128   +0.0085  [+0.0016, +0.0156]      0.992   YES
+#   16              0.9037   -0.0006  [-0.0081, +0.0074]      0.447   no
+#   20              0.8719   -0.0324
+#   30              0.7713   -0.1330
+#
+# Why 10 and not 12, which scores 0.0003 higher. The two are indistinguishable
+# on the point estimate and 10 has the tighter interval and P(>0) = 1.000
+# against 0.992. Past 12 the curve falls off a cliff, -0.009 by 16 and -0.13 by
+# 30, so the cost of being one notch too high is far larger than the cost of
+# being one notch too low. The hidden test is an unseen embryo, where the base
+# tracks are more fragmented than they are here, and a length filter deletes
+# more real material the more fragmented its input is. Every part of that
+# argument points to the conservative side of the optimum.
+#
+# The mechanism, because it decides how much of this should transfer. Raw
+# Jaccard barely moves, 0.9118 to 0.9130. Almost the whole gain is the node
+# count term: adj_J = max(0, J * (1 - 0.1 * (N_pred - N_true) / N_true)), which
+# has no upper cap, so predicting fewer nodes than the organisers' estimate
+# multiplies the Jaccard by more than one. Our weighted ratio is +0.148, so we
+# were handing back about 1.5% of the edge term. Filtering at 10 removes 26,632
+# nodes of 376,359 and costs 41 true positive edges of 12,393.
+#
+# PREDICTION, recorded before the leaderboard sees it. This should transfer at
+# or above face value rather than at the 86% the calibration chain managed. The
+# node count term is the one place NOTES.md already records the held-out 19 as
+# systematically under-reading: exp 6 moved it by +0.0006 locally and +0.005 on
+# the leaderboard. The step also has no learned parameters, which is the
+# property that separated the 86% transfers from the 16% ones. What would
+# falsify it is a flat or negative leaderboard move, which would say the hidden
+# embryo's tracks are fragmented enough that a filter at 10 is cutting real
+# track rather than junk, and the right response would be 7 rather than 6.
+#
+# Three steps in the chain were also measured as inert inside it and are left
+# alone rather than removed, since removing them is a second variable:
+# prune_isolated, gap_reuse_um and single_parent all score identically to the
+# shipped config. The first is subsumed by any min_track_len above 1, and the
+# ILP already returns at most one parent per node.
+name: unet50_ilp_calib_div_gap5_short10
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  backend: unet
+  det_threshold: 0.9900
+  pool_kernel_um: 5.0
+  det_tta: false
+  device: auto
+
+link:
+  backend: ilp
+  edge_activation: softmax
+  edge_threshold: 0.05
+  max_link_um: 14.0
+  ilp_edge_weight: -1.0
+  ilp_appearance_weight: 0.1
+  ilp_disappearance_weight: 0.1
+  ilp_division_weight: 1.0
+  ilp_num_threads: 1
+  ilp_gap: 0.0
+  ilp_timeout_s: 1800
+  ilp_total_budget_s: 28800
+
+calibrate:
+  enabled: true
+  max_edge_um: 14.0
+  single_parent: true
+  gap_close: true
+  gap_close_um: 5.0
+  gap_reuse_um: 3.2
+  gap_max_added_frac: 0.05
+  gap_max_added_abs: 2000
+  prune_isolated: true
+  # The one variable.
+  min_track_len: 10
+  linefit_smooth: true
+  linefit_weight: 0.8
+  linefit_window: 2
+  safe_divisions: true
+  safe_div_parent_um: 8.0
+  safe_div_sister_um: 11.0
+  safe_div_child_um: 10.0
+  safe_div_divergence_um: 4.0
+  safe_div_frame_frac: 0.0076
+  safe_div_global_frac: 0.00375

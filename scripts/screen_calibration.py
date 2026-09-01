@@ -37,6 +37,34 @@ from scripts.cache_graphs import HELDOUT, cache_path, load_cache  # noqa: E402
 # Arms are cumulative on purpose where a step only makes sense on top of another,
 # and isolated where it does not. `base` reproduces what exp 5 submitted, so
 # every delta below is against a graph we have a leaderboard score for.
+# The shipped configuration, conf/unet50_calib_div_gap5.yaml, exp 9, LB 0.878.
+# Arms below that start from this are one-variable changes against something the
+# leaderboard has scored, which is the only comparison worth making now.
+V9: dict = {
+    "max_edge_um": 14.0, "gate_um": 14.0,
+    "prune_isolated": True,
+    "gap_close": True, "gap_close_um": 5.0,
+    "min_track_len": 6,
+    "linefit_smooth": True, "linefit_weight": 0.8, "linefit_window": 2,
+    "safe_divisions": True, "safe_div_divergence_um": 4.0,
+}
+
+# V9 plus the one change the 2026-08-31 re-screen settled: the short-track
+# filter at 10 rather than the 6 inherited from the public notebooks. The curve
+# is 0.9043 at 6, 0.9125 at 10, 0.9128 at 12, 0.9037 at 16 and 0.7713 at 30, so
+# 10 sits on the safe side of a cliff rather than on top of it.
+V10: dict = V9 | {"min_track_len": 10}
+
+# V10 plus the two division gates that survived the 2026-09-01 screen. Symmetry
+# at 0.6 cut false forks 31 to 11 on its own; three-frame daughter persistence
+# takes it to 10 and the pair scores 0.9201. Five-frame persistence and adding
+# the cosine gate both reach 0.9208 with identical division counts, so the
+# cosine gate is subsumed by symmetry and the extra two frames buy one false
+# fork. Both of those are inside noise and both are less forgiving of a
+# fragmented graph, which the hidden embryo will have more of than this set.
+V11: dict = V10 | {"safe_div_min_symmetry": 0.6, "safe_div_child_len": 3}
+V11_NOGEO: dict = V11 | {"safe_divisions": False}
+
 ARMS: dict[str, dict] = {
     "base": {"max_edge_um": 7.0},
     "edge14": {"max_edge_um": 14.0},
@@ -99,6 +127,133 @@ ARMS: dict[str, dict] = {
                 "safe_divisions": True,
                      "safe_div_parent_um": 4.7, "safe_div_sister_um": 7.2,
                      "safe_div_divergence_um": 4.0},
+    # ---------------------------------------------------------------------
+    # Re-screen of the inherited chain against the FINISHED chain [2026-08-31].
+    #
+    # Every arm in the 2026-08-20 screen was measured on top of a partial chain.
+    # Gap closing lost 85% of its measured value once the short-track filter
+    # arrived, and NOTES.md records the open worry that `prune`, `short6` and
+    # `smooth` may be carrying similarly inflated numbers. These arms move one
+    # setting at a time against `v9`, which is exactly conf/unet50_calib_div_gap5
+    # and therefore has a leaderboard score of 0.878 behind it.
+    #
+    # All of them keep `gate_um` at 14 so they reuse the cached solve.
+    "v9": V9,
+    "v9_short4":    V9 | {"min_track_len": 4},
+    "v9_short5":    V9 | {"min_track_len": 5},
+    "v9_short7":    V9 | {"min_track_len": 7},
+    "v9_short8":    V9 | {"min_track_len": 8},
+    "v9_short10":   V9 | {"min_track_len": 10},
+    "v9_nosmooth":  V9 | {"linefit_smooth": False},
+    "v9_smw05":     V9 | {"linefit_weight": 0.5},
+    "v9_smw10":     V9 | {"linefit_weight": 1.0},
+    "v9_smwin1":    V9 | {"linefit_window": 1},
+    "v9_smwin3":    V9 | {"linefit_window": 3},
+    # Output cap alone, candidate gate held at 14 so the solve is shared. The
+    # 14 um cap came from the public notebooks and has never been screened as a
+    # cap; the 7.0 that `screen_link_cap.py` measured in 2026-08-18 was a gate on
+    # the local-max detector and does not carry.
+    "v9_cap10":     V9 | {"max_edge_um": 10.0, "gate_um": 14.0},
+    "v9_cap12":     V9 | {"max_edge_um": 12.0, "gate_um": 14.0},
+    "v9_cap16":     V9 | {"max_edge_um": 16.0, "gate_um": 14.0},
+    "v9_noprune":   V9 | {"prune_isolated": False},
+    "v9_reuse20":   V9 | {"gap_reuse_um": 2.0},
+    "v9_reuse45":   V9 | {"gap_reuse_um": 4.5},
+    "v9_gapcap10":  V9 | {"gap_max_added_frac": 0.10},
+    "v9_nosingle":  V9 | {"single_parent": False},
+
+    # ---------------------------------------------------------------------
+    # How far does the node-count bonus go [2026-08-31]?
+    #
+    # `adj_J = max(0, J * (1 - 0.1 * (N_pred - N_true) / N_true))` has no upper
+    # cap, so predicting FEWER nodes than the organisers' estimate multiplies the
+    # Jaccard by more than one. At `all` the weighted ratio is +0.152, meaning we
+    # hand back 1.5% of the edge term for over-detection. The short-track filter
+    # is the only step that moves the ratio without moving the true positives:
+    # 6 to 8 dropped 13,031 nodes and 9 true positives. So the sweep continues
+    # until the true positives start to pay for it.
+    "v9_short12":   V9 | {"min_track_len": 12},
+    "v9_short16":   V9 | {"min_track_len": 16},
+    "v9_short20":   V9 | {"min_track_len": 20},
+    "v9_short30":   V9 | {"min_track_len": 30},
+
+    # ---------------------------------------------------------------------
+    # Division precision [2026-08-31]. The rule returns 3 true forks against 30
+    # false ones, and on that ratio precision is worth about three times recall:
+    # removing every false positive takes divJ from 0.061 to 0.158, converting
+    # one more miss takes it to 0.082. Every gate the rule currently has is a
+    # distance, and the dominant failure mode is distance-blind: a neighbouring
+    # cell whose own parent link was missed sits near the track, continues, and
+    # diverges. These arms test geometry that a missed link cannot fake.
+    "v9_cos0":      V9 | {"safe_div_max_cos": 0.0},
+    "v9_cosm03":    V9 | {"safe_div_max_cos": -0.3},
+    "v9_cos05":     V9 | {"safe_div_max_cos": 0.5},
+    "v9_sym04":     V9 | {"safe_div_min_symmetry": 0.4},
+    "v9_sym06":     V9 | {"safe_div_min_symmetry": 0.6},
+    "v9_rel10":     V9 | {"safe_div_sister_rel": 1.0},
+    "v9_rel15":     V9 | {"safe_div_sister_rel": 1.5},
+    "v9_len3":      V9 | {"safe_div_child_len": 3},
+    "v9_len5":      V9 | {"safe_div_child_len": 5},
+    "v9_cos0_sym04": V9 | {"safe_div_max_cos": 0.0, "safe_div_min_symmetry": 0.4},
+    "v9_cos0_len3": V9 | {"safe_div_max_cos": 0.0, "safe_div_child_len": 3},
+    # Precision gates buy room to widen the distance gates, which is the only
+    # way recall moves. Judged on the total, not on the fork count.
+    "v9_cos0_wide": V9 | {"safe_div_max_cos": 0.0, "safe_div_parent_um": 10.0,
+                          "safe_div_sister_um": 14.0,
+                          "safe_div_frame_frac": 0.015},
+
+    # ---------------------------------------------------------------------
+    # Division gates, combined, on top of the settled track filter [2026-09-01].
+    # Screened singly against V9 the two that work are symmetry at 0.6, which cut
+    # false forks 31 to 11 while keeping all three true ones, and the cosine gate
+    # with three-frame daughter persistence, which reached the same division
+    # Jaccard while also gaining a true fork. These arms ask whether they are the
+    # same effect twice or two effects.
+    "v10": V10,
+    "v10_sym06":        V10 | {"safe_div_min_symmetry": 0.6},
+    "v10_cos0len3":     V10 | {"safe_div_max_cos": 0.0, "safe_div_child_len": 3},
+    "v10_sym06len3":    V10 | {"safe_div_min_symmetry": 0.6, "safe_div_child_len": 3},
+    "v10_sym06len5":    V10 | {"safe_div_min_symmetry": 0.6, "safe_div_child_len": 5},
+    "v10_all3":         V10 | {"safe_div_min_symmetry": 0.6, "safe_div_max_cos": 0.0,
+                               "safe_div_child_len": 3},
+    # Precision bought room; this spends it on recall. `cos0_wide` failed against
+    # V9 at -0.0043 with 45 false forks, but cosine alone was the weakest of the
+    # three gates. Widened under the strict pair instead.
+    "v10_strictwide":   V10 | {"safe_div_min_symmetry": 0.6, "safe_div_child_len": 3,
+                               "safe_div_parent_um": 10.0, "safe_div_sister_um": 14.0,
+                               "safe_div_frame_frac": 0.015},
+
+    # ---------------------------------------------------------------------
+    # The ILP can produce divisions and has never been allowed to [2026-08-31].
+    #
+    # The solver minimises cost. An edge costs `-1.0 * p`, a track start costs
+    # +0.1, and a division costs +1.0, so forking is chosen only when
+    # `p2 + 0.1 > 1.0`, that is when the second child's affinity exceeds 0.9.
+    # A softmax over a dense candidate matrix essentially never puts 0.9 on a
+    # second child, which is why every submission this repo has made carried
+    # zero ILP forks and why the division term had to be bolted on afterwards.
+    # Probed on 6bba_7b5d3b2c, 6374 nodes: 0 forks at 1.0, 38 at 0.7, 98 at 0.5,
+    # 188 at 0.3, 304 at 0.15. The 38 is close to what the public notebook's own
+    # division-rate cap implies for that video, and the solve is no slower.
+    #
+    # This matters because the geometric rule is blind to the affinity model and
+    # the solver is not. Each weight needs its own solve, so the paired arms
+    # share one: `_geo` keeps the bolt-on rule on top, the bare arm turns it off
+    # so the solver's forks are judged alone.
+    "v11": V11,
+    "divw09":      V11_NOGEO | {"ilp": {"division_weight": 0.9}},
+    "divw09_geo":  V11 | {"ilp": {"division_weight": 0.9}},
+    "divw08":      V11_NOGEO | {"ilp": {"division_weight": 0.8}},
+    "divw08_geo":  V11 | {"ilp": {"division_weight": 0.8}},
+    "divw065":     V11_NOGEO | {"ilp": {"division_weight": 0.65}},
+    "divw065_geo": V11 | {"ilp": {"division_weight": 0.65}},
+    "divw05":      V11_NOGEO | {"ilp": {"division_weight": 0.5}},
+    "divw05_geo":  V11 | {"ilp": {"division_weight": 0.5}},
+    "divw035":     V11_NOGEO | {"ilp": {"division_weight": 0.35}},
+    "divw035_geo": V11 | {"ilp": {"division_weight": 0.35}},
+    "divw02":      V11_NOGEO | {"ilp": {"division_weight": 0.2}},
+    "divw02_geo":  V11 | {"ilp": {"division_weight": 0.2}},
+
     # Objective arms, all on top of `all` because that is the submission
     # candidate and a weight change has to be judged against what we would ship.
     # The public 0.927 notebook runs appearance 0.0 with disappearance 1.5; these
@@ -149,7 +304,7 @@ def ilp_key(ilp_cfg: dict) -> str:
 
 
 def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
-            ilp_cfg: dict, threads: int) -> dict:
+            ilp_cfg: dict, threads: int, solve_timeout: float = 1800.0) -> dict:
     import torch
     torch.set_num_threads(max(1, threads))
 
@@ -165,7 +320,14 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
     # Narrowing it here gives exactly the candidate set that gating at this value
     # during scoring would have produced, since the gate is a pure distance
     # filter applied after the probabilities were computed.
-    gate = float(cfg.get("max_edge_um", 7.0))
+    # `gate_um` separates two settings that were previously one. `max_edge_um`
+    # is the output cap applied by `enforce_edge_rules`; the gate is the radius
+    # the candidate set is narrowed to before the solve. Tying them meant every
+    # cap value needed its own 20-minute solve, and it also confounded two
+    # variables: a cap arm was really testing "narrower candidates AND a
+    # narrower output filter". An arm that sets `gate_um` keeps the cached solve
+    # and moves the cap alone.
+    gate = float(cfg.get("gate_um", cfg.get("max_edge_um", 7.0)))
     scale_a = np.asarray(scale, dtype=np.float64)
     narrowed = []
     for t, aff in enumerate(affinities):
@@ -208,7 +370,7 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
             appearance_weight=float(w["appearance_weight"]),
             disappearance_weight=float(w["disappearance_weight"]),
             division_weight=float(w["division_weight"]),
-            num_threads=1, gap=0.0, timeout=1800.0,
+            num_threads=1, gap=0.0, timeout=solve_timeout,
         )
         tmp = solved_path + ".tmp.npz"
         np.savez_compressed(
@@ -218,7 +380,8 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
         )
         os.replace(tmp, solved_path)
 
-    graph, _ = calibrate(graph, scale, cfg)
+    graph, _ = calibrate(graph, scale,
+                         {k: v for k, v in cfg.items() if k != "gate_um"})
 
     gt = os.path.join(data_dir, sample + ".geff")
     sc = read_scale(os.path.join(data_dir, sample + ".zarr")) or DEFAULT_SCALE_ZYX
@@ -287,6 +450,11 @@ def main() -> None:
     ap.add_argument("--arms", default="", help="comma separated subset of arms")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--threads", type=int, default=1)
+    ap.add_argument("--solve-timeout", type=float, default=1800.0,
+                    help="seconds before the ILP is refused. Division arms add "
+                         "a binary per node and a constraint per fork, so they "
+                         "need more head room than the 1800 the pack defaults "
+                         "to.")
     args = ap.parse_args()
 
     arms = ({k: ARMS[k] for k in args.arms.split(",")} if args.arms else ARMS)
@@ -298,6 +466,7 @@ def main() -> None:
     print(f"{len(arms)} arms x {len(HELDOUT)} samples, cache {args.cache}\n",
           flush=True)
     results: dict[str, list[dict]] = {}
+    failures: list[tuple[str, str, str]] = []
     t0 = time.time()
     for arm, cfg in arms.items():
         # An arm's "ilp" block is the objective; everything else is calibration.
@@ -305,10 +474,24 @@ def main() -> None:
         cfg = {k: v for k, v in cfg.items() if k != "ilp"}
         rows: list[dict] = []
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futs = [pool.submit(run_one, arm, cfg, s, args.cache, args.data,
-                                ilp_cfg, args.threads) for s in HELDOUT]
+            futs = {pool.submit(run_one, arm, cfg, s, args.cache, args.data,
+                                ilp_cfg, args.threads, args.solve_timeout): s
+                    for s in HELDOUT}
             for f in as_completed(futs):
-                rows.append(f.result())
+                try:
+                    rows.append(f.result())
+                except Exception as exc:  # noqa: BLE001
+                    # A refused solve is the expected failure here: the ILP
+                    # raises rather than returning a truncated answer, because a
+                    # truncated branch-and-bound scores worse than not solving
+                    # at all. Losing one sample is a hole in one arm; losing the
+                    # run loses every arm behind it, and objective arms cost
+                    # about half an hour each.
+                    failures.append((arm, futs[f], repr(exc)))
+                    print(f"    FAILED {arm} {futs[f]}: {exc}", flush=True)
+        if not rows:
+            print(f"  {arm:12} every sample failed, skipped", flush=True)
+            continue
         rows.sort(key=lambda r: r["sample"])
         results[arm] = rows
         print(f"  {arm:12} score {total_score(rows):.4f}  "
@@ -354,6 +537,12 @@ def main() -> None:
             both = "yes" if all(x > 0 for x in per) else "no"
             print(f"{arm:14}{total_score(rows):>9.4f}{d:>+10.4f}"
                   f"{f'[{lo:+.4f}, {hi:+.4f}]':>22}{p:>8.3f}{both:>14}")
+
+    if failures:
+        print(f"\n{len(failures)} sample-arm pairs FAILED and their arms are "
+              "scored on fewer samples, so they are NOT comparable:")
+        for arm, sample, exc in failures:
+            print(f"  {arm} {sample}: {exc}")
 
     print("\nThe 19 are video-disjoint from the pack's training set but NOT "
           "embryo-disjoint,\nand the hidden test is. Exp 4 saw +0.1270 here "
