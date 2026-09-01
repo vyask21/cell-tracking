@@ -1,0 +1,112 @@
+# One variable against conf/unet50_short10.yaml: the safe-division rule gains two
+# structural gates, symmetry 0.6 and three-frame daughter persistence.
+#
+# The problem. The rule scored 3 true forks against 30 false ones. On that ratio
+# precision is worth about three times recall: removing every false positive
+# takes the division Jaccard from 0.061 to 0.158, while converting one more of
+# the 16 misses takes it to 0.082. Every gate the rule had was a distance, and so
+# was the divergence check.
+#
+# The diagnosis. The dominant false fork cannot be caught by a distance. It is a
+# neighbouring cell whose own link to its own parent was missed. That cell sits
+# near the track, continues normally and diverges from its supposed sister, so it
+# satisfies every existing constraint. What it does not do is sit opposite the
+# real child. A parent lies near the midpoint of its own two daughters and
+# nowhere near the midpoint of its child and an unrelated neighbour.
+#
+# Screened 2026-09-01 over the pack's held-out 19, each gate alone against exp 9:
+#
+#   gate                      div tp/fp/fn   divJ    delta      95% CI            both
+#   shipped                     3 / 31 / 16  0.060
+#   cosine <= 0.0               4 / 27 / 15  0.087  +0.0026  [-0.0012,+0.0081]   yes
+#   cosine <= -0.3              3 / 22 / 16  0.073  +0.0017  [-0.0051,+0.0089]   yes
+#   symmetry >= 0.4             3 / 21 / 16  0.075  +0.0026  [-0.0045,+0.0103]   yes
+#   symmetry >= 0.6             3 / 11 / 16  0.100  +0.0053  [-0.0033,+0.0145]   yes
+#   daughters survive 3         4 / 30 / 15  0.082  +0.0033  [-0.0005,+0.0083]   yes
+#   daughters survive 5         4 / 25 / 15  0.091  +0.0046  [+0.0003,+0.0091]   yes
+#   cosine 0 and survive 3      4 / 21 / 15  0.100  +0.0053  [+0.0007,+0.0109]   yes
+#   sister distance by density  2 / 30 / 17  0.041  -0.0016  [-0.0062,+0.0005]   no
+#   widened distances           3 / 45 / 16  0.047  -0.0043  [-0.0084,-0.0010]   no
+#
+# Symmetry is the strongest single gate and it is the one the field does not
+# have. It removes two thirds of the false forks and keeps all three true ones.
+# The public rule this geometry came from has parent, sister and child distances
+# and a divergence check, and no notion of the angle at the parent.
+#
+# Stacked on the track filter of exp 10, screened as combinations:
+#
+#   min_track_len 10 alone                    0.9125   3 / 31 / 16
+#   plus symmetry 0.6                         0.9189   3 / 11 / 16
+#   plus symmetry 0.6 and survive 3  <- this  0.9201   3 / 10 / 16
+#   plus symmetry 0.6 and survive 5           0.9208   3 /  9 / 16
+#   plus cosine 0, symmetry 0.6, survive 3    0.9208   3 /  9 / 16
+#
+# Two choices inside that, both to the conservative side. Five-frame persistence
+# scores 0.0007 higher than three-frame, which is noise, and it is less forgiving
+# of a fragmented graph; the hidden test is an unseen embryo and will have more
+# fragmentation than this set. Adding the cosine gate gives bit-identical
+# division counts to symmetry plus five-frame persistence, so symmetry subsumes
+# it and a third knob would buy nothing.
+#
+# The edge term improves as well, 0.9065 to 0.9098, because a false fork costs an
+# edge and a node as well as a division. That is the same coupling that sank the
+# ILP division-weight screen from the other direction.
+#
+# Not in this config, and both measured: letting the ILP price divisions is worse
+# at every weight from 0.9 down to 0.2, and the dangling-branch filter is inert
+# here, moving 1,063 nodes of 347,869. See NOTES.md 2026-09-01.
+name: unet50_ilp_calib_div_gap5_short10_divsym
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  backend: unet
+  det_threshold: 0.9900
+  pool_kernel_um: 5.0
+  det_tta: false
+  device: auto
+
+link:
+  backend: ilp
+  edge_activation: softmax
+  edge_threshold: 0.05
+  max_link_um: 14.0
+  ilp_edge_weight: -1.0
+  ilp_appearance_weight: 0.1
+  ilp_disappearance_weight: 0.1
+  # Left at 1.0. Screened 2026-09-01 at 0.9, 0.8, 0.65, 0.5, 0.35 and 0.2, six
+  # fresh solves, and rejected at every one of them monotonically, -0.0067 down
+  # to -0.0814. The solver finds missed divisions, false negatives 16 to 7, and
+  # cannot pay for them, false forks 10 to 803.
+  ilp_division_weight: 1.0
+  ilp_num_threads: 1
+  ilp_gap: 0.0
+  ilp_timeout_s: 1800
+  ilp_total_budget_s: 28800
+
+calibrate:
+  enabled: true
+  max_edge_um: 14.0
+  single_parent: true
+  gap_close: true
+  gap_close_um: 5.0
+  gap_reuse_um: 3.2
+  gap_max_added_frac: 0.05
+  gap_max_added_abs: 2000
+  prune_isolated: true
+  min_track_len: 10
+  linefit_smooth: true
+  linefit_weight: 0.8
+  linefit_window: 2
+  safe_divisions: true
+  safe_div_parent_um: 8.0
+  safe_div_sister_um: 11.0
+  safe_div_child_um: 10.0
+  safe_div_divergence_um: 4.0
+  safe_div_frame_frac: 0.0076
+  safe_div_global_frac: 0.00375
+  # The one variable: two structural gates on the fork proposal.
+  safe_div_min_symmetry: 0.6
+  safe_div_child_len: 3

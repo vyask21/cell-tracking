@@ -254,6 +254,31 @@ ARMS: dict[str, dict] = {
     "divw02":      V11_NOGEO | {"ilp": {"division_weight": 0.2}},
     "divw02_geo":  V11 | {"ilp": {"division_weight": 0.2}},
 
+    # ---------------------------------------------------------------------
+    # Dangling branches, which the component filter cannot reach [2026-09-01].
+    #
+    # `min_track_len` deletes weakly connected components, so a spurious
+    # three-node chain hanging off a two-hundred-node track is part of a
+    # two-hundred-and-three node component and no threshold will ever remove it.
+    # That chain is exactly what the node-count term charges for, and the node
+    # count term is now known to be where this pipeline's remaining slack is:
+    # `min_track_len` 6 to 10 was worth +0.0082 and almost none of it was the
+    # edge term. `filter_short_branches` splits the graph into tracklets and
+    # removes the dangling ones, leaving internal tracklets alone however short,
+    # because cutting one turns one edge error into two.
+    "v11_br3":  V11 | {"min_branch_len": 3},
+    "v11_br4":  V11 | {"min_branch_len": 4},
+    "v11_br5":  V11 | {"min_branch_len": 5},
+    "v11_br6":  V11 | {"min_branch_len": 6},
+    "v11_br8":  V11 | {"min_branch_len": 8},
+    "v11_br10": V11 | {"min_branch_len": 10},
+    # If dangling branches are the junk, the component filter may be able to
+    # come back down once they are gone, which would recover the true positives
+    # that 10 costs. Two variables on purpose, and only read if the branch
+    # filter earns its place on its own first.
+    "v11_br5_short6": V11 | {"min_branch_len": 5, "min_track_len": 6},
+    "v11_br5_short8": V11 | {"min_branch_len": 5, "min_track_len": 8},
+
     # Objective arms, all on top of `all` because that is the submission
     # candidate and a weight change has to be judged against what we would ship.
     # The public 0.927 notebook runs appearance 0.0 with disappearance 1.5; these
