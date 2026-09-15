@@ -319,6 +319,23 @@ ARMS: dict[str, dict] = {
     # public notebook runs BIOHUB_ILP_DIVISION_WEIGHT at 1.2. The axis has only
     # ever been walked downwards from the default.
     # `v11` itself is already defined above and is the reference arm.
+    # Motion relink, the last step in the public chain this repo had not built.
+    # Screened as a radius curve for the same reason the gap radius was: the
+    # public value is 6.0 tight with a 10.0 relaxed tier behind a learned bonus,
+    # and the one time this repo took a public radius on faith, 11.6 for gap
+    # closing, its own screen put the optimum at 5.0 and the public value cost
+    # 0.008. These arms have no learned bonus, so they are the tight tier alone
+    # and the curve decides where it sits.
+    #
+    # Every arm shares V11's objective, so they all reuse the cached ILP solve
+    # and the whole curve costs graph surgery only.
+    "v11_relink3":  V11 | {"motion_relink": True, "motion_relink_um": 3.0},
+    "v11_relink4":  V11 | {"motion_relink": True, "motion_relink_um": 4.0},
+    "v11_relink5":  V11 | {"motion_relink": True, "motion_relink_um": 5.0},
+    "v11_relink6":  V11 | {"motion_relink": True, "motion_relink_um": 6.0},
+    "v11_relink8":  V11 | {"motion_relink": True, "motion_relink_um": 8.0},
+    "v11_relink10": V11 | {"motion_relink": True, "motion_relink_um": 10.0},
+
     "v11_div12":    V11 | {"ilp": {"division_weight": 1.2}},
     "v11_div15":    V11 | {"ilp": {"division_weight": 1.5}},
     "v11_disapp20": V11 | {"ilp": {"disappearance_weight": 2.0}},

@@ -15,18 +15,22 @@ The steps, in the order they must run:
 
 1. `enforce_edge_rules`  drop edges that are not one frame forward, or longer
    than a cap, and reduce any node to a single parent.
-2. `close_single_frame_gaps`  a track that vanishes at t and reappears at t+2
+2. `motion_relink`  look again at every track end, and join it to a track start
+   one frame later if the cell's own velocity predicts that position. Adds no
+   node and can neither fork a track nor give one a second parent, so the edge
+   term is the only thing it moves.
+3. `close_single_frame_gaps`  a track that vanishes at t and reappears at t+2
    gets a synthetic node at t+1, which converts one missing edge into two present
    ones.
-3. `prune_isolated`  nodes with no edges at all are pure node-count penalty.
-4. `filter_short_tracks`  whole components shorter than a minimum are mostly
+4. `prune_isolated`  nodes with no edges at all are pure node-count penalty.
+5. `filter_short_tracks`  whole components shorter than a minimum are mostly
    false positives, and they cost twice: their edges are FP and their nodes
    inflate the node-count ratio.
-5. `add_safe_divisions`  give a node a second child where the geometry and the
+6. `add_safe_divisions`  give a node a second child where the geometry and the
    two daughters' subsequent divergence both say a mitosis happened. This is the
    only step that touches the division term, which a one-to-one linker forfeits
    entirely.
-6. `linefit_smooth`  move each node toward a line fitted through its temporal
+7. `linefit_smooth`  move each node toward a line fitted through its temporal
    neighbours. The metric matches predictions to ground truth by distance with a
    7 um cap, so moving a node a micron closer can flip it from unmatched to
    matched, and matching is what edges are scored on.
@@ -112,6 +116,138 @@ def enforce_edge_rules(
         st["dropped_multi_parent"] = int(edges.shape[0] - len(chosen))
         edges = edges[np.sort(np.asarray(chosen, dtype=np.int64))]
 
+    return Graph(nodes=graph.nodes, edges=edges)
+
+
+def motion_relink(
+    graph: Graph,
+    scale,
+    max_um: float = 6.0,
+    window: int = 3,
+    require_velocity: bool = False,
+    max_added_frac: float = 0.05,
+    max_added_abs: int = 2000,
+    stats: dict | None = None,
+) -> Graph:
+    """Join a track end to a track start one frame later, at the position motion predicts.
+
+    The last step in the public chain this repo had not built. The ILP decides
+    every t to t+1 assignment from the edge head's affinity and a termination
+    cost, and where the affinity is weak it prefers to end the track. This looks
+    at those ends again with a different kind of evidence: where the cell was
+    already going. A track moving steadily through a frame whose affinity dropped
+    is the case the solver handles worst and motion handles best.
+
+    Three properties make this the cleanest step in the chain to measure. It adds
+    no nodes, so the node-count penalty cannot move. It only ever links a source
+    with no outgoing edge, so it cannot invent a division. It only ever links a
+    target with no incoming edge, so it cannot create a second parent. The edge
+    term is the only thing it can change, in either direction.
+
+    `window` is the frozen-frame guard, and it is the reason velocity is not just
+    the previous displacement. 7.47% of adjacent frame pairs in `6bba` are exact
+    byte duplicates while the ground truth keeps moving, so a one-step estimate
+    reads zero velocity on one transition in thirteen and predicts the cell stays
+    put. Estimating over the longest baseline available up to `window` frames
+    dilutes a frozen pair to a fraction of the estimate instead of letting it
+    become the whole of it.
+
+    Runs after `enforce_edge_rules` and before gap closing, matching the public
+    order. After, because the parent lookup that gives velocity its baseline
+    assumes one parent per node. Before, because a hole this step fills properly
+    at t+1 is a hole gap closing would otherwise bridge across at t+2.
+    """
+    st = stats if stats is not None else {}
+    st.setdefault("relink_added", 0)
+    n = len(graph.nodes)
+    if n == 0 or max_um <= 0:
+        return graph
+
+    t = np.asarray(graph.nodes.t)
+    zyx = np.stack([graph.nodes.z, graph.nodes.y, graph.nodes.x], axis=1)
+    p = _physical(zyx, scale)
+
+    has_out = np.zeros(n, dtype=bool)
+    has_in = np.zeros(n, dtype=bool)
+    parent = np.full(n, -1, dtype=np.int64)
+    if graph.edges.shape[0]:
+        has_out[graph.edges[:, 0]] = True
+        has_in[graph.edges[:, 1]] = True
+        parent[graph.edges[:, 1]] = graph.edges[:, 0]
+
+    def velocity(i: int) -> tuple[np.ndarray, int]:
+        """Displacement per frame over the longest baseline up to `window`."""
+        j, k = i, 0
+        while k < window:
+            pj = int(parent[j])
+            if pj < 0:
+                break
+            j = pj
+            k += 1
+        if k == 0:
+            return np.zeros(3), 0
+        return (p[i] - p[j]) / float(k), k
+
+    starts_by_t: dict[int, list[int]] = {}
+    ends_by_t: dict[int, list[int]] = {}
+    for i in range(n):
+        if not has_in[i]:
+            starts_by_t.setdefault(int(t[i]), []).append(i)
+        if not has_out[i]:
+            ends_by_t.setdefault(int(t[i]), []).append(i)
+
+    cands: list[tuple[float, int, int]] = []
+    for ti, ends in ends_by_t.items():
+        nxt = starts_by_t.get(ti + 1)
+        if not nxt:
+            continue
+        preds = []
+        keep_ends = []
+        for i in ends:
+            v, k = velocity(i)
+            if require_velocity and k == 0:
+                continue
+            preds.append(p[i] + v)
+            keep_ends.append(i)
+        if not keep_ends:
+            continue
+        nxt_arr = np.asarray(nxt, dtype=np.int64)
+        preds_arr = np.stack(preds, axis=0)
+        tree = cKDTree(p[nxt_arr])
+        for e_idx, hit in enumerate(tree.query_ball_point(preds_arr, r=max_um)):
+            for h in hit:
+                j = int(nxt_arr[h])
+                d = float(np.linalg.norm(p[j] - preds_arr[e_idx]))
+                cands.append((d, keep_ends[e_idx], j))
+
+    if not cands:
+        return graph
+
+    # Greedy over the whole video by residual, not per node in id order, so the
+    # link a cell's own motion predicts best wins over one that merely fits.
+    # Same capping discipline as gap closing: a step that can only add edges
+    # needs a bound that does not depend on the graph being sensible.
+    budget = min(max(1, int(max_added_frac * n)), int(max_added_abs))
+    cands.sort(key=lambda c: c[0])
+    used_src: set[int] = set()
+    used_tgt: set[int] = set()
+    new_edges: list[tuple[int, int]] = []
+    for d, i, j in cands:
+        if len(new_edges) >= budget:
+            st["relink_budget_hit"] = True
+            break
+        if i in used_src or j in used_tgt:
+            continue
+        new_edges.append((i, j))
+        used_src.add(i)
+        used_tgt.add(j)
+
+    if not new_edges:
+        return graph
+    st["relink_added"] += len(new_edges)
+    add = np.asarray(new_edges, dtype=np.int64)
+    edges = (np.concatenate([graph.edges, add], axis=0)
+             if graph.edges.shape[0] else add)
     return Graph(nodes=graph.nodes, edges=edges)
 
 
@@ -732,6 +868,16 @@ def calibrate(graph: Graph, scale, cfg: dict | None = None) -> tuple[Graph, dict
             g, scale,
             max_edge_um=float(cfg.get("max_edge_um", 14.0)),
             single_parent=bool(cfg.get("single_parent", True)),
+            stats=stats,
+        )
+    if cfg.get("motion_relink", False):
+        g = motion_relink(
+            g, scale,
+            max_um=float(cfg.get("motion_relink_um", 6.0)),
+            window=int(cfg.get("motion_window", 3)),
+            require_velocity=bool(cfg.get("motion_require_velocity", False)),
+            max_added_frac=float(cfg.get("motion_max_added_frac", 0.05)),
+            max_added_abs=int(cfg.get("motion_max_added_abs", 2000)),
             stats=stats,
         )
     if cfg.get("gap_close", False):

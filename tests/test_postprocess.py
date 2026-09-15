@@ -16,6 +16,7 @@ from src.postprocess import (
     enforce_edge_rules,
     filter_short_tracks,
     linefit_smooth,
+    motion_relink,
     prune_isolated,
 )
 
@@ -355,3 +356,109 @@ def test_calibrate_leaves_divisions_off_unless_asked():
                                   "safe_div_frame_frac": 1.0,
                                   "safe_div_global_frac": 1.0})
     assert on.divisions().size == 1
+
+
+def test_a_break_is_relinked_at_the_position_velocity_predicts():
+    # A track moving 10 voxels in y per frame, broken between t=2 and t=3. The
+    # resumption sits 10 voxels on, which is where the velocity says it will be.
+    g = make([0, 1, 2, 3], [[0, 0, 0], [0, 10, 0], [0, 20, 0], [0, 30, 0]],
+             [(0, 1), (1, 2)])
+    out = motion_relink(g, SCALE, max_um=1.0)
+    assert {tuple(e) for e in out.edges} == {(0, 1), (1, 2), (2, 3)}
+
+
+def test_relinking_adds_no_nodes():
+    g = make([0, 1, 2, 3], [[0, 0, 0], [0, 10, 0], [0, 20, 0], [0, 30, 0]],
+             [(0, 1), (1, 2)])
+    out = motion_relink(g, SCALE, max_um=1.0)
+    assert len(out.nodes) == len(g.nodes)
+
+
+def test_a_stationary_prediction_does_not_reach_a_moving_cell():
+    # Same geometry, but the end has no parent, so velocity is zero and the
+    # prediction stays put. 10 voxels of y is 4.06 um, outside a 1 um radius.
+    g = make([2, 3], [[0, 20, 0], [0, 30, 0]], [])
+    assert motion_relink(g, SCALE, max_um=1.0).edges.shape[0] == 0
+    assert motion_relink(g, SCALE, max_um=5.0).edges.shape[0] == 1
+
+
+def test_require_velocity_refuses_an_end_with_no_history():
+    g = make([2, 3], [[0, 20, 0], [0, 30, 0]], [])
+    out = motion_relink(g, SCALE, max_um=5.0, require_velocity=True)
+    assert out.edges.shape[0] == 0
+
+
+def test_a_node_that_already_has_a_parent_is_never_given_another():
+    # 4 continues from 3 already. The end at 2 must not claim it as well.
+    g = make([1, 2, 2, 3], [[0, 10, 0], [0, 20, 0], [0, 21, 0], [0, 30, 0]],
+             [(0, 1), (2, 3)])
+    out = motion_relink(g, SCALE, max_um=5.0)
+    assert {tuple(e) for e in out.edges} == {(0, 1), (2, 3)}
+
+
+def test_an_end_is_never_given_two_children():
+    g = make([2, 3, 3], [[0, 20, 0], [0, 21, 0], [0, 22, 0]], [])
+    out = motion_relink(g, SCALE, max_um=5.0)
+    assert out.edges.shape[0] == 1
+    assert out.divisions().size == 0
+
+
+def test_the_closest_residual_wins_when_two_ends_want_one_start():
+    # Both ends are stationary. 1 sits nearer the start at 3 than 0 does.
+    g = make([2, 2, 3], [[0, 0, 0], [0, 25, 0], [0, 28, 0]], [])
+    out = motion_relink(g, SCALE, max_um=5.0)
+    assert {tuple(e) for e in out.edges} == {(1, 2)}
+
+
+def test_a_frozen_frame_does_not_zero_the_velocity_estimate():
+    # The case that matters is a freeze on the step immediately before the
+    # break, because that is the one a single-step estimate reads as the whole
+    # of the velocity. t=3 duplicates t=2, so the cell is detected at y=20
+    # twice. One step back says the velocity is zero and predicts y=20, which
+    # is 2.8 um short of the resumption. Three steps back still carry the two
+    # real displacements and predict y=26.7, which is within a tenth of it.
+    zyx = [[0, 0, 0], [0, 10, 0], [0, 20, 0], [0, 20, 0], [0, 27, 0]]
+    g = make([0, 1, 2, 3, 4], zyx, [(0, 1), (1, 2), (2, 3)])
+    assert motion_relink(g, SCALE, max_um=1.0, window=1).edges.shape[0] == 3
+    out = motion_relink(g, SCALE, max_um=1.0, window=3)
+    assert {tuple(e) for e in out.edges} == {(0, 1), (1, 2), (2, 3), (3, 4)}
+
+
+def test_relinking_respects_its_budget():
+    ts, zyx, edges = [], [], []
+    for c in range(10):
+        ts += [0, 1]
+        zyx += [[0, c * 100, 0], [0, c * 100 + 1, 0]]
+    g = make(ts, zyx, edges)
+    st: dict = {}
+    motion_relink(g, SCALE, max_um=5.0, max_added_frac=0.0, max_added_abs=3,
+                  stats=st)
+    assert st["relink_added"] == 1  # the frac floors at one, not at zero
+    st2: dict = {}
+    motion_relink(g, SCALE, max_um=5.0, max_added_frac=1.0, max_added_abs=3,
+                  stats=st2)
+    assert st2["relink_added"] == 3
+
+
+def test_calibrate_leaves_relinking_off_unless_asked():
+    g = make([0, 1, 2, 3], [[0, 0, 0], [0, 10, 0], [0, 20, 0], [0, 30, 0]],
+             [(0, 1), (1, 2)])
+    off, _ = calibrate(g, SCALE, {"max_edge_um": 14.0})
+    assert off.edges.shape[0] == 2
+    on, st = calibrate(g, SCALE, {"max_edge_um": 14.0, "motion_relink": True,
+                                  "motion_relink_um": 1.0})
+    assert on.edges.shape[0] == 3
+    assert st["relink_added"] == 1
+
+
+def test_relinking_runs_before_gaps_are_closed():
+    # A hole at t=2 that both steps could address. Relinking joins t=1 to the
+    # real detection at t=2; gap closing would have invented a node at t=2 and
+    # bridged to t=3. The node count is the difference and relinking is free.
+    zyx = [[0, 0, 0], [0, 10, 0], [0, 20, 0], [0, 30, 0]]
+    g = make([0, 1, 2, 3], zyx, [(0, 1), (2, 3)])
+    out, st = calibrate(g, SCALE, {"max_edge_um": 14.0, "motion_relink": True,
+                                   "motion_relink_um": 1.0, "gap_close": True})
+    assert len(out.nodes) == 4
+    assert st["relink_added"] == 1
+    assert st["gap_created"] == 0
