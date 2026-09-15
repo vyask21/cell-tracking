@@ -111,12 +111,76 @@ def load_detector(weights: str | os.PathLike | None = None, device: str = "auto"
     return model, window_size, downsample, torch
 
 
+# The dihedral group of the square, acting in the YX plane only. Elements are
+# numbered g = 2k + f, where k is the number of quarter turns and f says whether
+# an X flip follows. Numbering it this way makes the four-element subgroup a
+# literal subset, (0, 1, 4, 5) = {identity, flip X, rotate 180, flip Y}, so the
+# four-view path stays exactly what it was before the rotations were added.
+_D4_KLEIN = (0, 1, 4, 5)
+_D4_FULL = (0, 1, 2, 3, 4, 5, 6, 7)
+
+
+def _d4_apply(x, g, torch):
+    k, f = divmod(g, 2)
+    y = torch.rot90(x, k, dims=(-2, -1)) if k else x
+    return y.flip(-1) if f else y
+
+
+def _d4_invert(x, g, torch):
+    """Undo `_d4_apply`, which means undoing the flip before the rotation."""
+    k, f = divmod(g, 2)
+    y = x.flip(-1) if f else x
+    return torch.rot90(y, -k, dims=(-2, -1)) if k else y
+
+
+def _tta_views(imgs, views: int) -> tuple:
+    """Which group elements to average over, given the volume's own shape.
+
+    Z is never touched. The data is four times coarser in Z, so a Z flipped
+    volume is out of distribution. Y and X are 256 voxels each at 0.40625 um in
+    every sample profiled, so a quarter turn in that plane is both shape
+    preserving and in distribution, which is what makes the full group available.
+
+    The shape check is not decoration. A quarter turn transposes Y and X, so on a
+    volume that is not square in those axes it would hand the network a tensor of
+    a shape it never saw. Rather than fail on such a sample, fall back to the
+    four flips, which are shape preserving for any volume.
+    """
+    if int(views) < 8:
+        return _D4_KLEIN
+    if imgs.shape[-1] != imgs.shape[-2]:
+        return _D4_KLEIN
+    return _D4_FULL
+
+
+def _tta_average_det(model, imgs, det_logits, w: int, views: int, torch):
+    """Average detection logits over the chosen group, undoing each transform.
+
+    Only the detection head is averaged. The association features from the same
+    forward pass are taken from the untransformed view alone, so the edge
+    probabilities change here only through the detections they are computed on.
+    Averaging the association features as well is the step the public 0.947
+    notebook reports as its single largest gain, and it is a separate variable.
+    """
+    group = _tta_views(imgs, views)
+    for g in group[1:]:
+        _, det_g = model.encode(_d4_apply(imgs, g, torch))
+        for f in range(w):
+            det_logits[f] = det_logits[f] + _d4_invert(det_g[f], g, torch)
+        del det_g
+    n = float(len(group))
+    for f in range(w):
+        det_logits[f] = det_logits[f] / n
+    return det_logits
+
+
 def detect_sequence_unet(
     zarr_path: str | os.PathLike,
     model=None,
     det_threshold: float = 0.9550,
     pool_kernel_um: float = 5.0,
     det_tta: bool = False,
+    det_tta_views: int = 4,
     device: str = "auto",
     weights: str | os.PathLike | None = None,
     timepoints: range | None = None,
@@ -130,9 +194,10 @@ def detect_sequence_unet(
     It is a config value here for that reason, and it gets chosen on the folds
     rather than copied.
 
-    `det_tta` averages logits over Y and X flips. Z is deliberately not flipped:
-    the data is four times coarser in Z, so a Z-flipped volume is out of
-    distribution.
+    `det_tta` averages detection logits over a dihedral group acting in the YX
+    plane, `det_tta_views` of them: 4 for the flips alone, 8 for the full group
+    including quarter turns. Z is deliberately never touched, because the data is
+    four times coarser in Z and a Z-flipped volume is out of distribution.
 
     Windows slide with stride `window_size - 1` and each timepoint is detected
     the first time it appears, which mirrors the reference inference exactly.
@@ -198,13 +263,8 @@ def detect_sequence_unet(
             _, det_logits = model.encode(imgs)
 
             if det_tta:
-                for dims in [(-1,), (-2,), (-2, -1)]:
-                    _, det_flip = model.encode(imgs.flip(dims))
-                    for f in range(w):
-                        det_logits[f] = det_logits[f] + det_flip[f].flip(dims)
-                    del det_flip
-                for f in range(w):
-                    det_logits[f] = det_logits[f] / 4
+                det_logits = _tta_average_det(
+                    model, imgs, det_logits, w, det_tta_views, torch)
             del imgs
 
             for f_idx, t in enumerate(frame_indices):
@@ -229,6 +289,7 @@ def detect_and_score_sequence(
     det_threshold: float = 0.9550,
     pool_kernel_um: float = 5.0,
     det_tta: bool = False,
+    det_tta_views: int = 4,
     device: str = "auto",
     weights: str | os.PathLike | None = None,
     edge_activation: str = "softmax",
@@ -341,13 +402,8 @@ def detect_and_score_sequence(
             unet_out, det_logits = model.encode(imgs)
 
             if det_tta:
-                for dims in [(-1,), (-2,), (-2, -1)]:
-                    _, det_flip = model.encode(imgs.flip(dims))
-                    for f in range(w):
-                        det_logits[f] = det_logits[f] + det_flip[f].flip(dims)
-                    del det_flip
-                for f in range(w):
-                    det_logits[f] = det_logits[f] / 4
+                det_logits = _tta_average_det(
+                    model, imgs, det_logits, w, det_tta_views, torch)
             del imgs
 
             for f_idx, t in enumerate(frame_indices):

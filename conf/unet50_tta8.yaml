@@ -16,10 +16,18 @@
 # the only entry in the comparison table where this repo has the feature
 # switched off entirely rather than set to a different value.
 #
-# This config is the detection half only, which is what src/detect.py already
-# supports. Extending the averaging into the edge features is a code change
-# rather than a config change, so it is a separate experiment and stays out of
-# this one.
+# This config is the detection half only. Extending the averaging into the edge
+# features is a code change rather than a config change, so it is a separate
+# experiment and stays out of this one.
+#
+# CORRECTED 2026-09-15. This file was written claiming eight-view D4 while
+# `det_tta` in src/unet.py averaged four views, the flips alone, with no
+# rotations. The name said eight and the code did four. The group is now a
+# parameter, `det_tta_views`, and the four-view path is the same subgroup it
+# always was, so a cache built before today is still comparable. Quarter turns
+# are valid on this data: Y and X are 256 voxels each at 0.40625 um in every
+# sample profiled, so the turn is shape preserving and in distribution. A volume
+# that is not square in YX falls back to the four flips rather than failing.
 #
 # PREDICTION, recorded before the leaderboard sees it. A positive move, smaller
 # than the +0.005 the public chain reports for its own equivalent step, because
@@ -29,8 +37,11 @@
 # detector depends on, and the response would be to test the four in-plane
 # views alone before abandoning the axis.
 #
-# Cost: eight forward passes per volume rather than one. Check this against the
-# 12 h kernel budget before queueing a full inference run.
+# Cost: eight forward passes per volume rather than one, so eight times the
+# encode. The 19-sample cache takes about 70 minutes without it. Check the
+# measured cost against the 12 h kernel budget before queueing a full inference
+# run, and note the cache has to be rebuilt first because TTA changes the
+# detections every downstream arm is screened on.
 #
 # REBASED 2026-09-14 onto conf/unet50_divsym.yaml. The Kaggle submission
 # history shows exp11 divsym scored 0.892 on 2026-09-01, above exp10's 0.884,
@@ -48,6 +59,7 @@ detect:
   pool_kernel_um: 5.0
   # The one variable.
   det_tta: true
+  det_tta_views: 8
   device: auto
 
 link:
