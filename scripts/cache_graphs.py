@@ -101,8 +101,8 @@ def load_cache(path: str):
 
 
 def run_sample(sample: str, data_dir: str, cache_dir: str, det_threshold: float,
-               pool_kernel_um: float, det_tta: bool, gate_um: float,
-               edge_threshold: float, threads: int):
+               pool_kernel_um: float, det_tta: bool, det_tta_views: int,
+               gate_um: float, edge_threshold: float, threads: int):
     out = cache_path(cache_dir, sample)
     if os.path.exists(out):
         return sample, 0.0, -1, -1
@@ -121,6 +121,7 @@ def run_sample(sample: str, data_dir: str, cache_dir: str, det_threshold: float,
         det_threshold=det_threshold,
         pool_kernel_um=pool_kernel_um,
         det_tta=det_tta,
+        det_tta_views=det_tta_views,
         device="cpu",
         edge_activation="softmax",
         edge_threshold=edge_threshold,
@@ -141,6 +142,11 @@ def main() -> None:
     ap.add_argument("--det-threshold", type=float, required=True)
     ap.add_argument("--pool-kernel-um", type=float, default=5.0)
     ap.add_argument("--det-tta", action="store_true")
+    ap.add_argument("--det-tta-views", type=int, default=4, choices=(4, 8),
+                    help="size of the dihedral group averaged over in the YX "
+                         "plane. 4 is the flips, 8 adds the quarter turns. "
+                         "Measured on one sample at 6 frames: 4 views cost "
+                         "3.4x a plain pass and 8 cost 6.8x.")
     ap.add_argument("--gate-um", type=float, default=20.0)
     ap.add_argument("--edge-threshold", type=float, default=0.05)
     ap.add_argument("--cache", default="")
@@ -150,12 +156,13 @@ def main() -> None:
 
     tag = f"t{args.det_threshold:g}".replace(".", "")
     if args.det_tta:
-        tag += "_tta"
+        tag += f"_tta{args.det_tta_views}"
     cache = args.cache or f"data/meta/graph_cache_{tag}"
     os.makedirs(cache, exist_ok=True)
     done = sum(1 for s in HELDOUT if os.path.exists(cache_path(cache, s)))
     print(f"caching {len(HELDOUT)} samples to {cache}")
-    print(f"  det_threshold {args.det_threshold}, tta {args.det_tta}, "
+    print(f"  det_threshold {args.det_threshold}, tta {args.det_tta}"
+          f"{args.det_tta_views if args.det_tta else ''}, "
           f"gate {args.gate_um} um, edge_threshold {args.edge_threshold}")
     print(f"  {done} already cached\n", flush=True)
 
@@ -163,8 +170,8 @@ def main() -> None:
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futs = {
             pool.submit(run_sample, s, args.data, cache, args.det_threshold,
-                        args.pool_kernel_um, args.det_tta, args.gate_um,
-                        args.edge_threshold, args.threads): s
+                        args.pool_kernel_um, args.det_tta, args.det_tta_views,
+                        args.gate_um, args.edge_threshold, args.threads): s
             for s in HELDOUT
         }
         for i, f in enumerate(as_completed(futs), 1):
