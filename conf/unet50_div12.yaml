@@ -1,0 +1,82 @@
+# One variable against conf/unet50_divsym.yaml: the ILP division weight,
+# 1.0 to 1.2.
+#
+# Screened 2026-09-14 on V11, the shipped chain, in data/meta/v11_objective.csv:
+#
+#   arm            total     delta              95% CI       P(>0)  both embryos
+#   v11           0.9201
+#   v11_div12     0.9206   +0.0005   [+0.0000, +0.0014]      1.000       YES
+#   v11_div15     0.9206   +0.0005   [+0.0000, +0.0014]      1.000       YES
+#
+# The only arm in this session's screening to pass every gate: interval clear of
+# zero, P(>0) of 1.000, and neither embryo going backwards, 44b6 +0.0000 and
+# 6bba +0.0001.
+#
+# It is also very small, and the mechanism says why. 1.2 and 1.5 produce a
+# bit-identical solution, 347658 nodes and 12357 edge tp in both, so the axis
+# saturates immediately above the default. The entire gain is one false fork
+# removed, division fp 10 to 9, which lifts division Jaccard 0.1034 to 0.1071.
+# Edge tp, fp and fn do not move at all.
+#
+# PREDICTION, recorded before the leaderboard sees it. At face value this is
+# +0.0005 and the leaderboard reports three decimals, so the honest expectation
+# is no visible move. It is worth carrying because it costs nothing and cannot
+# hurt, not because it is the increment this repo needs. Do not spend a
+# submission on it alone.
+
+name: unet50_divsym_div12
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  backend: unet
+  det_threshold: 0.9900
+  pool_kernel_um: 5.0
+  det_tta: false
+  device: auto
+
+link:
+  backend: ilp
+  edge_activation: softmax
+  edge_threshold: 0.05
+  max_link_um: 14.0
+  ilp_edge_weight: -1.0
+  ilp_appearance_weight: 0.1
+  ilp_disappearance_weight: 0.1
+  # The one variable: 1.0 to 1.2.
+  #
+  # The 2026-09-01 screen walked this axis downwards only, 0.9 to 0.2, and
+  # rejected every value monotonically. Upwards was never tested. The public
+  # 0.947 notebook runs 1.2, which is what prompted the retest.
+  ilp_division_weight: 1.2
+  ilp_num_threads: 1
+  ilp_gap: 0.0
+  ilp_timeout_s: 1800
+  ilp_total_budget_s: 28800
+
+calibrate:
+  enabled: true
+  max_edge_um: 14.0
+  single_parent: true
+  gap_close: true
+  gap_close_um: 5.0
+  gap_reuse_um: 3.2
+  gap_max_added_frac: 0.05
+  gap_max_added_abs: 2000
+  prune_isolated: true
+  min_track_len: 10
+  linefit_smooth: true
+  linefit_weight: 0.8
+  linefit_window: 2
+  safe_divisions: true
+  safe_div_parent_um: 8.0
+  safe_div_sister_um: 11.0
+  safe_div_child_um: 10.0
+  safe_div_divergence_um: 4.0
+  safe_div_frame_frac: 0.0076
+  safe_div_global_frac: 0.00375
+  # The one variable: two structural gates on the fork proposal.
+  safe_div_min_symmetry: 0.6
+  safe_div_child_len: 3

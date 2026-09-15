@@ -279,11 +279,13 @@ ARMS: dict[str, dict] = {
     "v11_br5_short6": V11 | {"min_branch_len": 5, "min_track_len": 6},
     "v11_br5_short8": V11 | {"min_branch_len": 5, "min_track_len": 8},
 
-    # Objective arms, all on top of `all` because that is the submission
-    # candidate and a weight change has to be judged against what we would ship.
-    # The public 0.927 notebook runs appearance 0.0 with disappearance 1.5; these
-    # separate the two so the one-variable rule survives, and keep the combined
-    # arm so an interaction has somewhere to show up.
+    # Objective arms. SUPERSEDED 2026-09-14 and kept only so the numbers in
+    # NOTES.md have their definitions. Every arm below sets min_track_len 6 with
+    # no division gates, which was the submission candidate when they were
+    # written and has been two chain steps stale since exp 8. Division tp is 0
+    # and fn is 19 across all of them, so the division term, a tenth of the
+    # metric, contributes nothing to any number they produced. Read their deltas
+    # as directional only. The v11_* arms below are the live ones.
     "all_app0": {"max_edge_um": 14.0, "prune_isolated": True, "gap_close": True,
                  "min_track_len": 6, "linefit_smooth": True,
                  "ilp": {"appearance_weight": 0.0}},
@@ -295,6 +297,32 @@ ARMS: dict[str, dict] = {
                  "min_track_len": 6, "linefit_smooth": True,
                  "ilp": {"appearance_weight": 0.0,
                          "disappearance_weight": 1.5}},
+    "all_disapp20": {"max_edge_um": 14.0, "prune_isolated": True,
+                     "gap_close": True, "min_track_len": 6,
+                     "linefit_smooth": True,
+                     "ilp": {"disappearance_weight": 2.0}},
+    "all_disapp25": {"max_edge_um": 14.0, "prune_isolated": True,
+                     "gap_close": True, "min_track_len": 6,
+                     "linefit_smooth": True,
+                     "ilp": {"disappearance_weight": 2.5}},
+    "all_disapp30": {"max_edge_um": 14.0, "prune_isolated": True,
+                     "gap_close": True, "min_track_len": 6,
+                     "linefit_smooth": True,
+                     "ilp": {"disappearance_weight": 3.0}},
+
+    # Objective arms on V11, which is conf/unet50_divsym.yaml, exp 11, LB 0.892.
+    # Use `v11` as the reference arm, never `all`.
+    #
+    # v11_div12 is the one genuinely unexplored direction. The division weight
+    # was screened on 2026-09-01 at 0.9, 0.8, 0.65, 0.5, 0.35 and 0.2 and
+    # rejected monotonically, but every one of those is BELOW 1.0. The 0.947
+    # public notebook runs BIOHUB_ILP_DIVISION_WEIGHT at 1.2. The axis has only
+    # ever been walked downwards from the default.
+    # `v11` itself is already defined above and is the reference arm.
+    "v11_div12":    V11 | {"ilp": {"division_weight": 1.2}},
+    "v11_div15":    V11 | {"ilp": {"division_weight": 1.5}},
+    "v11_disapp20": V11 | {"ilp": {"disappearance_weight": 2.0}},
+    "v11_app0":     V11 | {"ilp": {"appearance_weight": 0.0}},
 }
 
 # The pack's objective, and the value every arm uses unless it says otherwise.

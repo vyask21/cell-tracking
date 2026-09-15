@@ -1,0 +1,94 @@
+# One variable against conf/unet50_divsym.yaml: detection test-time
+# augmentation, det_tta false to true.
+#
+# Source, read 2026-09-14. The public notebook "Biohub Cell Tracking: 0.947 LB"
+# by Kaggle user srcB documents its own progression as
+# 0.933, 0.934, 0.939, 0.941, 0.946, 0.947. The single largest step in that
+# chain, 0.941 to 0.946, is described as extending eight-view D4 spatial TTA
+# from detection logits into the UNet association features. The following step
+# to 0.947 extends the same averaging into the secondary model's association
+# features and the DeepCenter gate. Together that is +0.006 of the public
+# plateau, produced by inference-time averaging alone.
+#
+# Why this config is first in the queue. It has no learned parameters. NOTES.md
+# records that property as the one separating the steps that transferred to the
+# leaderboard at face value from the ones that transferred at 16%. It is also
+# the only entry in the comparison table where this repo has the feature
+# switched off entirely rather than set to a different value.
+#
+# This config is the detection half only, which is what src/detect.py already
+# supports. Extending the averaging into the edge features is a code change
+# rather than a config change, so it is a separate experiment and stays out of
+# this one.
+#
+# PREDICTION, recorded before the leaderboard sees it. A positive move, smaller
+# than the +0.005 the public chain reports for its own equivalent step, because
+# that figure covers both the detection and the association halves and this is
+# the detection half alone. What would falsify it is a flat or negative move,
+# which would say the eight views are averaging away a detection asymmetry this
+# detector depends on, and the response would be to test the four in-plane
+# views alone before abandoning the axis.
+#
+# Cost: eight forward passes per volume rather than one. Check this against the
+# 12 h kernel budget before queueing a full inference run.
+#
+# REBASED 2026-09-14 onto conf/unet50_divsym.yaml. The Kaggle submission
+# history shows exp11 divsym scored 0.892 on 2026-09-01, above exp10's 0.884,
+# and the ledger never recorded it. The one-variable rule is against what we
+# would ship, so the base is divsym.
+name: unet50_divsym_tta8
+seed: 42
+
+cv:
+  scheme: leave_one_embryo_out
+
+detect:
+  backend: unet
+  det_threshold: 0.9900
+  pool_kernel_um: 5.0
+  # The one variable.
+  det_tta: true
+  device: auto
+
+link:
+  backend: ilp
+  edge_activation: softmax
+  edge_threshold: 0.05
+  max_link_um: 14.0
+  ilp_edge_weight: -1.0
+  ilp_appearance_weight: 0.1
+  ilp_disappearance_weight: 0.1
+  # Left at 1.0. Screened 2026-09-01 at 0.9, 0.8, 0.65, 0.5, 0.35 and 0.2, six
+  # fresh solves, and rejected at every one of them monotonically, -0.0067 down
+  # to -0.0814. The solver finds missed divisions, false negatives 16 to 7, and
+  # cannot pay for them, false forks 10 to 803.
+  ilp_division_weight: 1.0
+  ilp_num_threads: 1
+  ilp_gap: 0.0
+  ilp_timeout_s: 1800
+  ilp_total_budget_s: 28800
+
+calibrate:
+  enabled: true
+  max_edge_um: 14.0
+  single_parent: true
+  gap_close: true
+  gap_close_um: 5.0
+  gap_reuse_um: 3.2
+  gap_max_added_frac: 0.05
+  gap_max_added_abs: 2000
+  prune_isolated: true
+  min_track_len: 10
+  linefit_smooth: true
+  linefit_weight: 0.8
+  linefit_window: 2
+  safe_divisions: true
+  safe_div_parent_um: 8.0
+  safe_div_sister_um: 11.0
+  safe_div_child_um: 10.0
+  safe_div_divergence_um: 4.0
+  safe_div_frame_frac: 0.0076
+  safe_div_global_frac: 0.00375
+  # The one variable: two structural gates on the fork proposal.
+  safe_div_min_symmetry: 0.6
+  safe_div_child_len: 3
