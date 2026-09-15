@@ -558,7 +558,18 @@ def main() -> None:
     ap.add_argument("--data", default="data/raw/train")
     ap.add_argument("--out", default="data/meta/calibration_screen.csv")
     ap.add_argument("--arms", default="", help="comma separated subset of arms")
-    ap.add_argument("--workers", type=int, default=4)
+    # One, not the core count, and this is a measurement rather than caution.
+    # A single ILP solve on the largest graphs in this set peaks above 2 GB, so
+    # on a 16 GB machine two of them plus the usual desktop load is enough to get
+    # the run killed. That happened three times on 2026-09-15 before the cause
+    # was read correctly: at four workers the run managed one solve in eleven
+    # minutes because it was thrashing, and it looked like slow solving rather
+    # than memory pressure. At one worker the same screen finished in 19.3
+    # minutes. Parallelism was never buying anything here.
+    #
+    # Raise it only for a screen whose solves are already cached, where each arm
+    # is graph surgery and costs megabytes rather than gigabytes.
+    ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--threads", type=int, default=1)
     ap.add_argument("--solve-timeout", type=float, default=1800.0,
                     help="seconds before the ILP is refused. Division arms add "
