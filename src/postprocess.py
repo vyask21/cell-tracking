@@ -15,22 +15,25 @@ The steps, in the order they must run:
 
 1. `enforce_edge_rules`  drop edges that are not one frame forward, or longer
    than a cap, and reduce any node to a single parent.
-2. `motion_relink`  look again at every track end, and join it to a track start
+2. `filter_asymmetric_divisions`  drop a fork whose two arms are too unequal
+   to be a mitosis, by the same symmetry test that gates the geometric rule.
+   Off by default, and only meaningful when the solver was allowed to fork.
+3. `motion_relink`  look again at every track end, and join it to a track start
    one frame later if the cell's own velocity predicts that position. Adds no
    node and can neither fork a track nor give one a second parent, so the edge
    term is the only thing it moves.
-3. `close_single_frame_gaps`  a track that vanishes at t and reappears at t+2
+4. `close_single_frame_gaps`  a track that vanishes at t and reappears at t+2
    gets a synthetic node at t+1, which converts one missing edge into two present
    ones.
-4. `prune_isolated`  nodes with no edges at all are pure node-count penalty.
-5. `filter_short_tracks`  whole components shorter than a minimum are mostly
+5. `prune_isolated`  nodes with no edges at all are pure node-count penalty.
+6. `filter_short_tracks`  whole components shorter than a minimum are mostly
    false positives, and they cost twice: their edges are FP and their nodes
    inflate the node-count ratio.
-6. `add_safe_divisions`  give a node a second child where the geometry and the
+7. `add_safe_divisions`  give a node a second child where the geometry and the
    two daughters' subsequent divergence both say a mitosis happened. This is the
    only step that touches the division term, which a one-to-one linker forfeits
    entirely.
-7. `linefit_smooth`  move each node toward a line fitted through its temporal
+8. `linefit_smooth`  move each node toward a line fitted through its temporal
    neighbours. The metric matches predictions to ground truth by distance with a
    7 um cap, so moving a node a micron closer can flip it from unmatched to
    matched, and matching is what edges are scored on.
@@ -117,6 +120,127 @@ def enforce_edge_rules(
         edges = edges[np.sort(np.asarray(chosen, dtype=np.int64))]
 
     return Graph(nodes=graph.nodes, edges=edges)
+
+
+def filter_asymmetric_divisions(
+    graph: Graph,
+    scale,
+    min_symmetry: float = 0.6,
+    min_child_len: int = 0,
+    stats: dict | None = None,
+) -> Graph:
+    """Remove a fork whose two arms are too unequal to be a mitosis.
+
+    The mirror of the gate inside `add_safe_divisions`, pointed the other way.
+    That gate decides which forks to CREATE and is the reason the geometric rule
+    scores 3 true forks against 10 false ones instead of 3 against 31. This one
+    decides which existing forks to KEEP, and it exists because the 2026-09-01
+    ILP screen left something untested.
+
+    That screen priced divisions in the solver and rejected every weight from 0.9
+    down to 0.2. Its finding was not that the solver cannot find divisions: false
+    negatives fell 16 to 7, so the affinity model does know where some of the
+    missed ones are. The finding was that precision collapses an order of
+    magnitude faster, 10 false forks to 803. Every arm in that screen ran the
+    geometric rule as an ADDITIVE step on top, never as a filter, so the solver's
+    own forks were never subjected to the symmetry test at all. Whether the test
+    that removes two thirds of the geometric rule's false forks also removes the
+    solver's is a different question and this is what asks it.
+
+    `min_symmetry` is the ratio of the shorter to the longer parent-to-daughter
+    distance, the same quantity `add_safe_divisions` computes, so the two steps
+    are testing one criterion and not two. When a fork fails, the longer arm is
+    the edge dropped: a parent lies near the midpoint of its own daughters, so
+    the child that sits far off is the one more likely to belong elsewhere.
+
+    `min_child_len` additionally requires both daughters to survive that many
+    frames, which is V11's other division gate. 0 disables it.
+
+    A node with more than two children keeps its best-symmetry pair and loses the
+    rest. Three outgoing edges is not a mitosis under any reading of the metric,
+    which pairs one parent with two daughters.
+
+    Nothing here removes nodes. Dropping a fork's arm leaves the child where it
+    was, and `prune_isolated` and the short-track filter downstream decide
+    whether it still belongs. That ordering is deliberate: the 2026-09-01 screen
+    found that a cheap fork rescues an orphan and its whole fragment from the
+    track filter, so a step that removes forks has to run before the steps that
+    would have cleaned up after them.
+    """
+    st = stats if stats is not None else {}
+    st.setdefault("div_filter_dropped", 0)
+    st.setdefault("div_filter_forks_cut", 0)
+    n = len(graph.nodes)
+    if n == 0 or graph.edges.shape[0] == 0:
+        return graph
+    if min_symmetry <= 0.0 and min_child_len <= 0:
+        return graph
+
+    t = np.asarray(graph.nodes.t)
+    zyx = np.stack([graph.nodes.z, graph.nodes.y, graph.nodes.x], axis=1)
+    pos = _physical(zyx, scale)
+
+    src = graph.edges[:, 0]
+    children: dict[int, list[int]] = {}
+    for k in range(graph.edges.shape[0]):
+        children.setdefault(int(src[k]), []).append(int(graph.edges[k, 1]))
+
+    succ = np.full(n, -1, dtype=np.int64)
+    for s, cs in children.items():
+        if len(cs) == 1:
+            succ[s] = cs[0]
+
+    def survives(node: int, frames: int) -> bool:
+        """Follow single-child successors and report reaching `frames` steps."""
+        cur, steps = node, 0
+        while steps < frames:
+            nxt = int(succ[cur])
+            if nxt < 0:
+                kids = children.get(cur, [])
+                if len(kids) != 1:
+                    return len(kids) > 1  # a fork counts as continuing
+                nxt = kids[0]
+            if int(t[nxt]) != int(t[cur]) + 1:
+                return False
+            cur, steps = nxt, steps + 1
+        return True
+
+    drop: set[tuple[int, int]] = set()
+    for s, kids in children.items():
+        if len(kids) < 2:
+            continue
+        best, best_sym = None, -1.0
+        for a_i in range(len(kids)):
+            for b_i in range(a_i + 1, len(kids)):
+                a, b = kids[a_i], kids[b_i]
+                da = float(np.linalg.norm(pos[a] - pos[s]))
+                db = float(np.linalg.norm(pos[b] - pos[s]))
+                if da <= 0.0 or db <= 0.0:
+                    continue
+                sym = min(da, db) / max(da, db)
+                if sym > best_sym:
+                    best, best_sym = (a, b, da, db), sym
+        if best is None:
+            continue
+        a, b, da, db = best
+        # Everything outside the best pair goes regardless of the threshold.
+        for c in kids:
+            if c not in (a, b):
+                drop.add((s, c))
+        fail = best_sym < min_symmetry
+        if not fail and min_child_len > 0:
+            fail = not (survives(a, min_child_len) and survives(b, min_child_len))
+        if fail:
+            drop.add((s, a if da > db else b))
+            st["div_filter_forks_cut"] += 1
+
+    if not drop:
+        return graph
+    keep = np.array(
+        [(int(e[0]), int(e[1])) not in drop for e in graph.edges], dtype=bool
+    )
+    st["div_filter_dropped"] += int((~keep).sum())
+    return Graph(nodes=graph.nodes, edges=graph.edges[keep])
 
 
 def motion_relink(
@@ -868,6 +992,16 @@ def calibrate(graph: Graph, scale, cfg: dict | None = None) -> tuple[Graph, dict
             g, scale,
             max_edge_um=float(cfg.get("max_edge_um", 14.0)),
             single_parent=bool(cfg.get("single_parent", True)),
+            stats=stats,
+        )
+    if cfg.get("filter_divisions", False):
+        # Before anything that removes nodes. Cutting a fork's arm orphans the
+        # child, and prune_isolated and the short-track filter downstream are
+        # what decide whether it survives on its own merits.
+        g = filter_asymmetric_divisions(
+            g, scale,
+            min_symmetry=float(cfg.get("div_filter_min_symmetry", 0.6)),
+            min_child_len=int(cfg.get("div_filter_child_len", 0)),
             stats=stats,
         )
     if cfg.get("motion_relink", False):

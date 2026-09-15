@@ -14,6 +14,7 @@ from src.postprocess import (
     calibrate,
     close_single_frame_gaps,
     enforce_edge_rules,
+    filter_asymmetric_divisions,
     filter_short_tracks,
     linefit_smooth,
     motion_relink,
@@ -462,3 +463,73 @@ def test_relinking_runs_before_gaps_are_closed():
     assert len(out.nodes) == 4
     assert st["relink_added"] == 1
     assert st["gap_created"] == 0
+
+
+def test_a_symmetric_fork_survives_the_filter():
+    # Parent at y=0, daughters at +/- 10 voxels, so symmetry is 1.0.
+    g = make([0, 1, 1], [[0, 0, 0], [0, -10, 0], [0, 10, 0]], [(0, 1), (0, 2)])
+    out = filter_asymmetric_divisions(g, SCALE, min_symmetry=0.6)
+    assert {tuple(e) for e in out.edges} == {(0, 1), (0, 2)}
+
+
+def test_a_lopsided_fork_loses_its_longer_arm():
+    # Arms of 2 and 20 voxels, symmetry 0.1, below the 0.6 gate.
+    g = make([0, 1, 1], [[0, 0, 0], [0, -2, 0], [0, 20, 0]], [(0, 1), (0, 2)])
+    out = filter_asymmetric_divisions(g, SCALE, min_symmetry=0.6)
+    assert {tuple(e) for e in out.edges} == {(0, 1)}
+
+
+def test_the_filter_removes_no_nodes():
+    g = make([0, 1, 1], [[0, 0, 0], [0, -2, 0], [0, 20, 0]], [(0, 1), (0, 2)])
+    out = filter_asymmetric_divisions(g, SCALE, min_symmetry=0.6)
+    assert len(out.nodes) == 3
+
+
+def test_a_triple_fork_keeps_only_its_best_pair():
+    # Children at -10, +10 and +40. The first two are the symmetric pair.
+    g = make([0, 1, 1, 1],
+             [[0, 0, 0], [0, -10, 0], [0, 10, 0], [0, 40, 0]],
+             [(0, 1), (0, 2), (0, 3)])
+    out = filter_asymmetric_divisions(g, SCALE, min_symmetry=0.6)
+    assert {tuple(e) for e in out.edges} == {(0, 1), (0, 2)}
+
+
+def test_a_fork_whose_daughter_dies_early_is_cut_when_persistence_is_required():
+    # Symmetric arms, but child 2 stops immediately while child 1 continues.
+    ts = [0, 1, 1, 2, 3]
+    zyx = [[0, 0, 0], [0, -10, 0], [0, 10, 0], [0, -12, 0], [0, -14, 0]]
+    edges = [(0, 1), (0, 2), (1, 3), (3, 4)]
+    g = make(ts, zyx, edges)
+    kept = filter_asymmetric_divisions(g, SCALE, min_symmetry=0.6,
+                                       min_child_len=0)
+    assert kept.edges.shape[0] == 4
+    cut = filter_asymmetric_divisions(g, SCALE, min_symmetry=0.6,
+                                      min_child_len=2)
+    assert (0, 2) not in {tuple(e) for e in cut.edges}
+
+
+def test_a_plain_track_is_untouched():
+    ts, zyx, edges = chain(6)
+    g = make(ts, zyx, edges)
+    out = filter_asymmetric_divisions(g, SCALE, min_symmetry=0.6)
+    assert out.edges.shape[0] == 5
+
+
+def test_calibrate_leaves_the_division_filter_off_unless_asked():
+    g = make([0, 1, 1], [[0, 0, 0], [0, -2, 0], [0, 20, 0]], [(0, 1), (0, 2)])
+    off, _ = calibrate(g, SCALE, {"max_edge_um": 14.0})
+    assert off.edges.shape[0] == 2
+    on, st = calibrate(g, SCALE, {"max_edge_um": 14.0, "filter_divisions": True})
+    assert on.edges.shape[0] == 1
+    assert st["div_filter_forks_cut"] == 1
+
+
+def test_the_filter_runs_before_isolated_nodes_are_pruned():
+    # Cutting the bad arm orphans node 2, which pruning then removes. If the
+    # order were reversed the orphan would survive as a node with no edges.
+    g = make([0, 1, 1], [[0, 0, 0], [0, -2, 0], [0, 20, 0]], [(0, 1), (0, 2)])
+    out, st = calibrate(g, SCALE, {"max_edge_um": 14.0, "filter_divisions": True,
+                                   "prune_isolated": True})
+    assert st["div_filter_forks_cut"] == 1
+    assert st["pruned_isolated"] == 1
+    assert len(out.nodes) == 2

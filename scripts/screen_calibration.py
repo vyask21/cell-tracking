@@ -336,6 +336,33 @@ ARMS: dict[str, dict] = {
     "v11_relink8":  V11 | {"motion_relink": True, "motion_relink_um": 8.0},
     "v11_relink10": V11 | {"motion_relink": True, "motion_relink_um": 10.0},
 
+    # Pricing divisions in the solver, revisited with a filter rather than an
+    # additive rule. The 2026-09-01 screen rejected every weight from 0.9 to 0.2
+    # because false forks went 10 to 803 while false negatives went 16 to 7. Its
+    # arms ran the geometric rule as an ADDITIVE step, so the solver's own forks
+    # were never put through the symmetry test that removes two thirds of the
+    # geometric rule's false forks. These pair each weight with and without the
+    # filter, so the filter's effect is isolated rather than confounded with the
+    # weight. All the solves are already cached from that screen, so this costs
+    # graph surgery only.
+    #
+    # `v11_filt` is the control: the shipped chain with the filter on. Its forks
+    # all come from the geometric rule and have already passed symmetry 0.6, so
+    # anything other than a near-null result here means the filter is reading the
+    # geometry differently from the gate and one of the two is wrong.
+    "v11_filt":        V11 | {"filter_divisions": True},
+    "v11_ilp09":       V11 | {"ilp": {"division_weight": 0.9}},
+    "v11_ilp09_filt":  V11 | {"filter_divisions": True,
+                              "ilp": {"division_weight": 0.9}},
+    "v11_ilp065":      V11 | {"ilp": {"division_weight": 0.65}},
+    "v11_ilp065_filt": V11 | {"filter_divisions": True,
+                              "ilp": {"division_weight": 0.65}},
+    "v11_ilp05":       V11 | {"ilp": {"division_weight": 0.5}},
+    "v11_ilp05_filt":  V11 | {"filter_divisions": True,
+                              "ilp": {"division_weight": 0.5}},
+    "v11_ilp05_filt3": V11 | {"filter_divisions": True, "div_filter_child_len": 3,
+                              "ilp": {"division_weight": 0.5}},
+
     # Chain settings most coupled to the node count, kept ready for a re-screen
     # on a cache whose detections have moved. Eight-view TTA cuts detections by
     # about 9% on the probe, and the 2026-09-01 entry established that the
