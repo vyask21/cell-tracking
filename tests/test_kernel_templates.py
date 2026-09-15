@@ -95,3 +95,68 @@ def test_the_matched_leak_run_may_share_an_embryo_but_never_a_video():
     assert "leak_splits.json" in shared
     assert "if False and overlap" in shared
     assert "in both train and test" in shared
+
+
+def test_cache_script_parses():
+    from src.graphcache import HELDOUT
+
+    for views in (1, 4, 8):
+        code = kernel.CACHE_TEMPLATE.format(
+            competition=COMPETITION,
+            dataset_slug=kernel.DATASET_SLUG,
+            user="someone",
+            pack_slug=kernel.PACK_SLUG,
+            prelude=kernel.UNET_PRELUDE,
+            n_samples=len(HELDOUT),
+            det_threshold=0.99,
+            det_tta=(views > 1),
+            views=views,
+            gate_um=20.0,
+            edge_threshold=0.05,
+            pool_kernel_um=5.0,
+        )
+        ast.parse(code)
+
+
+def test_the_cache_script_settings_match_the_cache_it_is_compared_against():
+    """Every setting but the TTA group has to equal the local cache's.
+
+    `data/meta/graph_cache_t099` was built at threshold 0.99, pool 5 um, gate
+    20 um and edge threshold 0.05. A screen comparing a TTA arm against it is
+    only a one-variable comparison if those four agree, and a mismatch would not
+    raise anywhere: it would just quietly measure two changes at once.
+    """
+    from src.graphcache import HELDOUT
+
+    code = kernel.CACHE_TEMPLATE.format(
+        competition=COMPETITION,
+        dataset_slug=kernel.DATASET_SLUG,
+        user="someone",
+        pack_slug=kernel.PACK_SLUG,
+        prelude=kernel.UNET_PRELUDE,
+        n_samples=len(HELDOUT),
+        det_threshold=0.99,
+        det_tta=True,
+        views=8,
+        gate_um=20.0,
+        edge_threshold=0.05,
+        pool_kernel_um=5.0,
+    )
+    for expected in ("det_threshold=0.99,", "pool_kernel_um=5.0,",
+                     "max_link_um=20.0,", "edge_threshold=0.05,",
+                     "det_tta=True,", "det_tta_views=8,"):
+        assert expected in code, expected
+    # The cache is worthless if it silently runs on CPU: at 6.8x a plain pass
+    # that cannot finish inside the twelve hour limit, and a partial cache reads
+    # as a complete one.
+    assert 'device="cuda"' in code
+    assert "refusing to build the cache on CPU" in code
+
+
+def test_the_cache_script_covers_every_heldout_sample():
+    from src.graphcache import HELDOUT
+
+    assert len(HELDOUT) == 19
+    assert len(set(HELDOUT)) == 19
+    assert sum(1 for s in HELDOUT if s.startswith("44b6")) == 5
+    assert sum(1 for s in HELDOUT if s.startswith("6bba")) == 14
