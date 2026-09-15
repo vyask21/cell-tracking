@@ -336,6 +336,19 @@ ARMS: dict[str, dict] = {
     "v11_relink8":  V11 | {"motion_relink": True, "motion_relink_um": 8.0},
     "v11_relink10": V11 | {"motion_relink": True, "motion_relink_um": 10.0},
 
+    # Chain settings most coupled to the node count, kept ready for a re-screen
+    # on a cache whose detections have moved. Eight-view TTA cuts detections by
+    # about 9% on the probe, and the 2026-09-01 entry established that the
+    # short-track filter pays through the node count term rather than the edge
+    # term, so its optimum is a function of how many nodes there are. Running
+    # these on the old cache would just reproduce numbers already in this file;
+    # they exist for the new one. Gap closing is here for the same reason, since
+    # it invents nodes and its radius was chosen against the old density.
+    "v11_short8":   V11 | {"min_track_len": 8},
+    "v11_short12":  V11 | {"min_track_len": 12},
+    "v11_gap4":     V11 | {"gap_close_um": 4.0},
+    "v11_gap6":     V11 | {"gap_close_um": 6.0},
+
     "v11_div12":    V11 | {"ilp": {"division_weight": 1.2}},
     "v11_div15":    V11 | {"ilp": {"division_weight": 1.5}},
     "v11_disapp20": V11 | {"ilp": {"disappearance_weight": 2.0}},
