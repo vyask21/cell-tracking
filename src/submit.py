@@ -11,10 +11,20 @@ The flow is:
 
 1. `python -m src.kernel push --config conf/<name>.yaml` uploads the inference
    notebook.
-2. Kaggle runs it, then you click "Submit to Competition" on the notebook page.
-   There is no public API endpoint for submitting a kernel to a competition, so
-   that one step is manual. Anything claiming otherwise here would be a lie that
-   surfaces as a silent no-op.
+2. Kaggle runs it, then submit that run:
+
+       kaggle competitions submit -c <slug> -k <owner/kernel> -v <version>            -f submission.csv -m "exp<id> <name>: <one variable changed>"
+
+   This paragraph used to say there was no API endpoint for submitting a kernel
+   and that the step had to be done by hand in the browser. That was wrong. The
+   flag exists, it was tested on exp 12 on 2026-09-18 and used again for exp 13 on
+   2026-09-19. The claim is corrected rather than deleted because it was stated
+   here emphatically enough to be believed.
+
+   The message cannot be edited after upload and neither can the filename, so get
+   both right the first time. Re-uploading resets the timestamp, which costs
+   tie-break position, and on this competition's plateau that is worth more than
+   the score.
 3. `python -m src.submit --id <exp> --status` polls for the score and writes it
    into the ledger row it belongs to.
 
