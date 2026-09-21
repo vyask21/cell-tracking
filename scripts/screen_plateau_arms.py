@@ -100,8 +100,19 @@ def verdict(lo: float, hi: float, per_embryo: dict[str, float]) -> str:
     """The repo's rule, stated once so no caller can soften it.
 
     An arm that fails either half is reported as inconclusive, never as a gain.
+
+    Embryos with no samples are skipped rather than counted as failures. Screen 3
+    scores only 6bba, because that is DeepCenter's held-out split, so the 44b6
+    entry is NaN there. NaN > 0 is False, so before this was written no arm in a
+    single-embryo screen could reach REAL whatever it scored. It happened not to
+    change that screen's conclusion, since no interval cleared zero anyway, which
+    is exactly how a broken check survives unnoticed.
+
+    A single-embryo screen has no cross-embryo replication, so the rule is weaker
+    there and the caller is told so rather than left to assume.
     """
-    both_positive = all(v > 0 for v in per_embryo.values())
+    present = {k: v for k, v in per_embryo.items() if v == v}
+    both_positive = bool(present) and all(v > 0 for v in present.values())
     clear_of_zero = lo > 0
     if clear_of_zero and both_positive:
         return "REAL"
@@ -183,6 +194,11 @@ def main() -> None:
 
     real = [r["arm"] for r in out_rows if r["verdict"] == "REAL"]
     print(f"\nclears the repo's rule: {', '.join(real) if real else 'nothing'}")
+
+    embryos = {embryo_of(s) for s in base}
+    if len(embryos) < 2:
+        print(f"NOTE: one embryo only ({sorted(embryos)[0]}), so the both-embryos "
+              f"half of the rule did not run. A REAL here rests on the interval alone.")
 
     if args.out:
         os.makedirs(os.path.dirname(args.out), exist_ok=True)
