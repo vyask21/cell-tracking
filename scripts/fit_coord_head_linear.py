@@ -21,10 +21,18 @@ regime, so the module itself is untouched.
 
 Normalisation is fitted inside each fold for the held-out table and on all 19
 for the shipped head. Writes artifacts/plateau_headfit/coord_head_linear.json.
+
+    python scripts/fit_coord_head_linear.py --wide
+
+reads the 59-video capture instead, artifacts/plateau_headfit_wide/coord_pairs_wide.npz.
+Training uses every video; the held-out table leaves out and scores only the
+support pack's held-out 19, since the other 40 were seen by the U-Net and the
+hidden test was not. Writes coord_head_linear_wide.json beside it.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -36,6 +44,12 @@ PAIRS = REPO / "artifacts" / "plateau_headfit" / "coord_pairs.npz"
 PAIRS_SHA256 = "eb58db346c10413510907aab7ba9102870ba7e135f2d65d68f9ca008fa5c57d6"
 OUT = REPO / "artifacts" / "plateau_headfit" / "coord_head_linear.json"
 LAMBDAS = (10.0, 100.0, 1000.0)
+HELD_OUT_19 = (
+    "44b6_1574802b", "44b6_706092f0", "44b6_d5e7d891", "44b6_d754aa59", "44b6_e57ff5c6",
+    "6bba_2312ac41", "6bba_268e1230", "6bba_283bf9f1", "6bba_3a1849c2", "6bba_3abfe10a",
+    "6bba_5c824876", "6bba_61dd1e0d", "6bba_7af54fde", "6bba_7b5d3b2c", "6bba_aeee7805",
+    "6bba_afb141ff", "6bba_c27cba08", "6bba_c328f2fd", "6bba_d1acb6ff",
+)
 SHIP = 100.0
 
 
@@ -69,10 +83,18 @@ def predict(mean, scale, w, x):
 
 
 def main() -> int:
-    raw = PAIRS.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != PAIRS_SHA256:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--wide", action="store_true")
+    args = ap.parse_args()
+    pairs, out = PAIRS, OUT
+    if args.wide:
+        pairs = REPO / "artifacts" / "plateau_headfit_wide" / "coord_pairs_wide.npz"
+        out = pairs.with_name("coord_head_linear_wide.json")
+    raw = pairs.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    if not args.wide and digest != PAIRS_SHA256:
         raise SystemExit("coord_pairs.npz changed")
-    d = np.load(PAIRS)
+    d = np.load(pairs)
     x, y, g = d["X"].astype(np.float64), d["Y"].astype(np.float64), d["G"]
     emb = np.array([s[:4] for s in g])
     for e in ("44b6", "6bba"):
@@ -81,7 +103,7 @@ def main() -> int:
     table = {}
     for lam in LAMBDAS:
         rows = {}
-        for stem in np.unique(g):
+        for stem in (HELD_OUT_19 if args.wide else np.unique(g)):
             te = g == stem
             mean, scale, w = fit(x[~te], y[~te], lam)
             after = np.linalg.norm(y[te] - predict(mean, scale, w, x[te]), axis=1).mean()
@@ -99,14 +121,14 @@ def main() -> int:
     mean, scale, w = fit(x, y, SHIP)
     delta = np.c_[(x - mean) / scale, np.ones(len(x))] @ w
     print(f"shipped lambda {SHIP:.0f}: pre-bound |d| max {np.abs(delta).max():.3f}")
-    OUT.write_text(json.dumps({
-        "lambda": SHIP, "pairs_sha256": PAIRS_SHA256,
+    out.write_text(json.dumps({
+        "lambda": SHIP, "pairs_sha256": digest,
         "mean": mean.astype(np.float32).tolist(), "scale": scale.astype(np.float32).tolist(),
         "weight": w[:-1].T.astype(np.float32).tolist(), "bias": w[-1].astype(np.float32).tolist(),
         "max_abs_pre_bound": float(np.abs(delta).max()),
         "lovo": table,
     }))
-    print(f"wrote {OUT}")
+    print(f"wrote {out}")
     return 0
 
 
