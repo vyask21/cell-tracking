@@ -1,7 +1,7 @@
 """Build the bet A submission kernel: exp 25 with learned divisions.
 
     python scripts/fit_division_model.py
-    python scripts/build_gapstack_learneddiv_kernel.py
+    python scripts/build_gapstack_learneddiv_kernel.py --tau 0.01
 
 One variable against exp 25, which scored 0.956: the post-link division step. The
 published cascade (fixed distance gates, mutual nearest neighbour, divergence,
@@ -16,10 +16,21 @@ The model is embedded as LightGBM text and as dumped trees. LightGBM is used whe
 the image has it, otherwise a numpy evaluator walks the dumped trees. Either way
 the kernel scores stored probe rows at start-up and raises if the predictions
 differ from those recorded at fit time.
+
+Why --tau 0.01 and not the threshold the fit script chose. The model was trained
+on the 100 in-sample videos, whose detections the networks have seen, and its
+scores shrink on unseen videos: on the held-out 19 it ranks candidates at AUC
+0.991 and average precision 0.315 against a 0.006 base rate, but the in-sample
+threshold of 0.1 accepts one candidate there, a false one. The test videos are
+unseen, so the threshold is set on the held-out 19, where division Jaccard is
+0.170, 0.167 and 0.156 at 0.005, 0.01 and 0.02 against 0.071 for the cascade.
+0.01 is the middle of that plateau. Chosen on the validation set, so the held-out
+number is optimistic; the gain holds across the plateau.
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 from pathlib import Path
@@ -103,6 +114,9 @@ def _learned_divisions_postlink(nodes_by_id, edges, stats, dataset, bundle, fram
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tau", type=float, default=None, help="override the fitted threshold")
+    args = ap.parse_args()
     spec = importlib.util.spec_from_file_location("divcap", REPO / "scripts" / "build_divcapture_kernel.py")
     divcap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(divcap)
@@ -113,6 +127,8 @@ def main() -> int:
         raise SystemExit("could not derive the row function")
 
     model = json.loads(MODEL.read_text(encoding="utf-8"))
+    if args.tau is not None:
+        model["tau"] = args.tau
     payload = json.dumps({k: model[k] for k in ("features", "tau", "model_str", "dump", "probe_x", "probe_p")})
     if '"""' in payload:
         raise SystemExit("model payload contains a triple quote")
