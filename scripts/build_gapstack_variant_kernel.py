@@ -2,6 +2,7 @@
 
     python scripts/build_gapstack_variant_kernel.py --probe blend
     python scripts/build_gapstack_variant_kernel.py --probe divcombo
+    python scripts/build_gapstack_variant_kernel.py --probe blend --weight 0.35
 
 Nothing public beats 0.953: the two most-voted 0.953 notebooks are byte-level
 copies of the exp 21 source and the third adds a runtime sweep and still lands at
@@ -12,7 +13,9 @@ blend    The refined shift becomes the mean of the published head's shift and
          this stack alone. Implemented by patching the written refinement module
          so the second head loads from V1284_HEAD2 and is averaged at weight
          V1284_BLEND = 0.5. The second head is mounted from the output of
-         cell-tracking-plateau-headfit-wide.
+         cell-tracking-plateau-headfit-wide. Exp 25 at weight 0.5 scored 0.956
+         against 0.953 for the published head alone; --weight sets the share
+         of our head for the follow-up probes and names them blend035 and so on.
 
 divcombo The overrides that exp 17's source selected and that moved our anchor
          from 0.947 to 0.948: DeepCenter safe-division veto 0.25 to 0.15, parent
@@ -89,12 +92,21 @@ def replace_once(cells, old, new):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", choices=sorted(TITLES), required=True)
+    ap.add_argument("--weight", type=float, default=0.5, help="blend share of the wide MLP head")
     args = ap.parse_args()
+    name = args.probe
+    title = TITLES[args.probe]
     nb = json.loads(BASE.read_text(encoding="utf-8"))
     cells = nb["cells"]
     meta = json.loads((BASE.parent / "kernel-metadata.json").read_text(encoding="utf-8"))
     if args.probe == "blend":
-        replace_once(cells, BLEND_ANCHOR, BLEND_CODE + BLEND_ANCHOR)
+        code = BLEND_CODE
+        if args.weight != 0.5:
+            code = (code.replace("os.environ['V1284_BLEND'] = '0.5'", f"os.environ['V1284_BLEND'] = '{args.weight}'")
+                        .replace("published + wide MLP at 0.5", f"published + wide MLP at {args.weight}"))
+            name = f"blend{round(args.weight * 100):03d}"
+            title = f"published head blended with the wide MLP head at weight {args.weight}"
+        replace_once(cells, BLEND_ANCHOR, code + BLEND_ANCHOR)
         meta["kernel_sources"] = ["vyask21/cell-tracking-plateau-headfit-wide"]
     else:
         for old, new in DIVCOMBO:
@@ -107,11 +119,11 @@ def main() -> int:
         if c["cell_type"] == "code":
             compile("".join(c["source"]), f"cell{i}", "exec")
 
-    out_dir = REPO / "notebooks" / f"plateau_gapstack_head_{args.probe}"
+    out_dir = REPO / "notebooks" / f"plateau_gapstack_head_{name}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    code_file = f"gapstack_head_{args.probe}.ipynb"
+    code_file = f"gapstack_head_{name}.ipynb"
     (out_dir / code_file).write_text(json.dumps(nb, indent=1, ensure_ascii=False), encoding="utf-8")
-    meta["id"] = f"vyask21/cell-tracking-plateau-gapstack-head-{args.probe}"
+    meta["id"] = f"vyask21/cell-tracking-plateau-gapstack-head-{name}"
     meta["title"] = meta["id"].split("/")[1]
     meta["code_file"] = code_file
     (out_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
