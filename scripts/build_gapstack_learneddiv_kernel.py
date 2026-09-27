@@ -2,6 +2,10 @@
 
     python scripts/fit_division_model.py
     python scripts/build_gapstack_learneddiv_kernel.py --tau 0.01
+    python scripts/build_gapstack_learneddiv_kernel.py --tau 0.01 --base ens5
+
+--base ens5 applies the same change on top of the exp 29 five-seed head ensemble
+instead of exp 25, for the combination run if both bets pay.
 
 One variable against exp 25, which scored 0.956: the post-link division step. The
 published cascade (fixed distance gates, mutual nearest neighbour, divergence,
@@ -99,7 +103,13 @@ def _learned_divisions_postlink(nodes_by_id, edges, stats, dataset, bundle, fram
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tau", type=float, default=None, help="override the fitted threshold")
+    ap.add_argument("--base", choices=("blend", "ens5"), default="blend")
     args = ap.parse_args()
+    base, out_dir, kernel_id = BASE, OUT_DIR, KERNEL_ID
+    if args.base == "ens5":
+        base = REPO / "notebooks" / "plateau_gapstack_head_ens5" / "gapstack_head_ens5.ipynb"
+        out_dir = REPO / "notebooks" / "plateau_ens5_learneddiv"
+        kernel_id = "vyask21/cell-tracking-plateau-ens5-learneddiv"
     spec = importlib.util.spec_from_file_location("divcap", REPO / "scripts" / "build_divcapture_kernel.py")
     divcap = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(divcap)
@@ -118,7 +128,7 @@ def main() -> int:
         raise SystemExit("model payload contains a triple quote")
     code = rows_fn + MODEL_CODE.replace("__MODEL__", payload)
 
-    nb = json.loads(BASE.read_text(encoding="utf-8"))
+    nb = json.loads(base.read_text(encoding="utf-8"))
     cells = nb["cells"]
     divcap.replace_once(cells, divcap.DIVLOG_ANCHOR, code + divcap.DIVLOG_ANCHOR)
     divcap.replace_once(cells, divcap.CALL_OLD,
@@ -131,15 +141,15 @@ def main() -> int:
     for i, c in enumerate(cells):
         if c["cell_type"] == "code":
             compile("".join(c["source"]), f"cell{i}", "exec")
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    code_file = "gapstack_head_blend_learneddiv.ipynb"
-    (OUT_DIR / code_file).write_text(json.dumps(nb, indent=1, ensure_ascii=False), encoding="utf-8")
-    meta = json.loads((BASE.parent / "kernel-metadata.json").read_text(encoding="utf-8"))
-    meta["id"] = KERNEL_ID
+    out_dir.mkdir(parents=True, exist_ok=True)
+    code_file = out_dir.name.replace("plateau_", "") + ".ipynb"
+    (out_dir / code_file).write_text(json.dumps(nb, indent=1, ensure_ascii=False), encoding="utf-8")
+    meta = json.loads((base.parent / "kernel-metadata.json").read_text(encoding="utf-8"))
+    meta["id"] = kernel_id
     meta["title"] = KERNEL_ID.split("/")[1]
     meta["code_file"] = code_file
-    (OUT_DIR / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {OUT_DIR / code_file}, tau {model['tau']}")
+    (out_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {out_dir / code_file}, tau {model['tau']}")
     return 0
 
 
