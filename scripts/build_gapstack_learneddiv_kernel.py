@@ -146,7 +146,7 @@ def main() -> int:
     (out_dir / code_file).write_text(json.dumps(nb, indent=1, ensure_ascii=False), encoding="utf-8")
     meta = json.loads((base.parent / "kernel-metadata.json").read_text(encoding="utf-8"))
     meta["id"] = kernel_id
-    meta["title"] = KERNEL_ID.split("/")[1]
+    meta["title"] = kernel_id.split("/")[1]
     meta["code_file"] = code_file
     (out_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out_dir / code_file}, tau {model['tau']}")
