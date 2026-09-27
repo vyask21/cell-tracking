@@ -12,10 +12,11 @@ code the capture kernels ran, taken from scripts/build_divcapture_kernel.py
 rather than rewritten. Candidates are accepted in descending score above the
 chosen threshold, each parent and each daughter at most once.
 
-The model is embedded as LightGBM text and as dumped trees. LightGBM is used when
-the image has it, otherwise a numpy evaluator walks the dumped trees. Either way
-the kernel scores stored probe rows at start-up and raises if the predictions
-differ from those recorded at fit time.
+The model is embedded as LightGBM text, zlib-compressed and base64-encoded, since
+Kaggle rejected the 2.6 MB notebook that also carried the dumped trees. LightGBM
+is in the Kaggle image; if it were missing the kernel stops at start-up rather
+than running without the model. The kernel scores stored probe rows at start-up
+and raises if the predictions differ from those recorded at fit time.
 
 Why --tau 0.01 and not the threshold the fit script chose. The model was trained
 on the 100 in-sample videos, whose detections the networks have seen, and its
@@ -31,8 +32,10 @@ number is optimistic; the gain holds across the plateau.
 from __future__ import annotations
 
 import argparse
+import base64
 import importlib.util
 import json
+import zlib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -46,40 +49,20 @@ import json
 _DIVMODEL = json.loads(r"""__MODEL__""")
 
 
-def _tree_value(node, row):
-    while "leaf_value" not in node:
-        v = row[node["split_feature"]]
-        missing = node.get("missing_type", "None")
-        if v != v and missing == "None":
-            v = 0.0
-        if (v != v and missing == "NaN") or (missing == "Zero" and (v != v or v == 0.0)):
-            node = node["left_child"] if node.get("default_left", True) else node["right_child"]
-        elif v <= node["threshold"]:
-            node = node["left_child"]
-        else:
-            node = node["right_child"]
-    return node["leaf_value"]
+import base64 as _b64
+import zlib as _zlib
+import lightgbm as _lgb
+_divbooster = _lgb.Booster(model_str=_zlib.decompress(_b64.b64decode(_DIVMODEL["model_z"])).decode())
 
 
 def _divmodel_predict(X):
-    X = np.asarray(X, dtype=np.float64)
-    if _DIVMODEL.get("_booster") is not None:
-        return _DIVMODEL["_booster"].predict(X)
-    raw = np.array([sum(_tree_value(t["tree_structure"], row) for t in _DIVMODEL["dump"]["tree_info"]) for row in X])
-    return 1.0 / (1.0 + np.exp(-raw))
+    return _divbooster.predict(np.asarray(X, dtype=np.float64))
 
 
-try:
-    import lightgbm as _lgb
-    _DIVMODEL["_booster"] = _lgb.Booster(model_str=_DIVMODEL["model_str"])
-    _divmodel_backend = "lightgbm " + _lgb.__version__
-except Exception as _lgb_exc:
-    _DIVMODEL["_booster"] = None
-    _divmodel_backend = f"numpy trees ({type(_lgb_exc).__name__})"
 _probe_err = float(np.max(np.abs(_divmodel_predict(_DIVMODEL["probe_x"]) - np.asarray(_DIVMODEL["probe_p"]))))
 if _probe_err > 1e-6:
     raise RuntimeError(("division model probe mismatch", _probe_err))
-print(f"learned divisions: {_divmodel_backend}, tau {_DIVMODEL['tau']}, probe error {_probe_err:.2e}")
+print(f"learned divisions: lightgbm {_lgb.__version__}, tau {_DIVMODEL['tau']}, probe error {_probe_err:.2e}")
 
 
 def _learned_divisions_postlink(nodes_by_id, edges, stats, dataset, bundle, frame_cache, dc_cache):
@@ -129,7 +112,8 @@ def main() -> int:
     model = json.loads(MODEL.read_text(encoding="utf-8"))
     if args.tau is not None:
         model["tau"] = args.tau
-    payload = json.dumps({k: model[k] for k in ("features", "tau", "model_str", "dump", "probe_x", "probe_p")})
+    model["model_z"] = base64.b64encode(zlib.compress(model["model_str"].encode(), 9)).decode()
+    payload = json.dumps({k: model[k] for k in ("features", "tau", "model_z", "probe_x", "probe_p")})
     if '"""' in payload:
         raise SystemExit("model payload contains a triple quote")
     code = rows_fn + MODEL_CODE.replace("__MODEL__", payload)
