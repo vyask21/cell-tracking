@@ -39,7 +39,7 @@ REPO = Path(__file__).resolve().parent.parent
 BASE = REPO / "notebooks" / "plateau_gapstack_head_blend" / "gapstack_head_blend.ipynb"
 MODEL = REPO / "artifacts" / "divmodel" / "divmodel.json"
 OUT_DIR = REPO / "notebooks" / "plateau_gapstack_head_blend_learneddiv"
-KERNEL_ID = "vyask21/cell-tracking-plateau-gapstack-head-blend-learneddiv"
+KERNEL_ID = "vyask21/cell-tracking-plateau-learneddiv"
 
 MODEL_CODE = r'''
 import json
