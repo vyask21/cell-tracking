@@ -99,7 +99,7 @@ def main() -> int:
 
     final = lgb.train(PARAMS, lgb.Dataset(ins[FEATURES], ins["y_strict"]), ROUNDS)
     ph = final.predict(held[FEATURES])
-    print("\nheld-out 19, model trained on the 100 in-sample videos")
+    print(f"\nheld-out 19, model trained on the {ins.dataset.nunique()} in-sample videos")
     j, tp, fp, fn = division_jaccard(held[held.accepted == 1], n_true_held)
     print(f"  cascade today          divJ {j:.4f}  tp {tp} fp {fp} fn {fn}")
     for tau in sorted({best_tau, 0.2, 0.3, 0.4}):
