@@ -4,6 +4,9 @@
     python scripts/build_gapstack_learneddiv_kernel.py --tau 0.01
     python scripts/build_gapstack_learneddiv_kernel.py --tau 0.01 --base ens5
 
+A --tau other than 0.01 writes a separately named probe kernel, learneddiv-tau005
+and so on, leaving exp 30's files untouched.
+
 --base ens5 applies the same change on top of the exp 29 five-seed head ensemble
 instead of exp 25, for the combination run if both bets pay.
 
@@ -106,6 +109,10 @@ def main() -> int:
     ap.add_argument("--base", choices=("blend", "ens5"), default="blend")
     args = ap.parse_args()
     base, out_dir, kernel_id = BASE, OUT_DIR, KERNEL_ID
+    if args.tau is not None and args.tau != 0.01:
+        tag = f"tau{round(args.tau * 1000):03d}"
+        out_dir = REPO / "notebooks" / f"plateau_learneddiv_{tag}"
+        kernel_id = f"vyask21/cell-tracking-plateau-learneddiv-{tag}"
     if args.base == "ens5":
         base = REPO / "notebooks" / "plateau_gapstack_head_ens5" / "gapstack_head_ens5.ipynb"
         out_dir = REPO / "notebooks" / "plateau_ens5_learneddiv"
