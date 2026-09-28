@@ -2,6 +2,11 @@
 
     python scripts/build_divcapture_kernel.py --part 1
     python scripts/build_divcapture_kernel.py --part 2
+    python scripts/build_divcapture_kernel.py --part 3
+    python scripts/build_divcapture_kernel.py --part 4
+
+Parts 3 and 4, added 2026-09-28 after exp 30 scored 0.957 with a model trained
+on 47 true-division examples, cover every remaining training video, 76 in all.
 
 The exp 25 configuration, which scored 0.956, is run over training videos where
 ground truth exists, and two things are recorded on the way:
@@ -60,6 +65,22 @@ def video_parts() -> tuple[list[str], list[str]]:
     rng = random.Random(SEED)
     picked = sorted(rng.sample(pool, 100))
     return list(headfit.HELD_OUT_19) + picked[:41], picked[41:]
+
+
+def rest_parts() -> tuple[list[str], list[str]]:
+    """Parts 3 and 4: every training video without a division log after parts 1 and 2.
+
+    That is the 36 videos no capture has touched plus the 40 in-sample videos of
+    the wide capture, which ran before division logging existed. The four example
+    test videos stay excluded.
+    """
+    wide = load("wide", REPO / "scripts" / "build_headfit_wide_kernel.py")
+    part1, part2 = video_parts()
+    split = json.loads((REPO / "data" / "meta" / "dataset_splits.json").read_text(encoding="utf-8"))[0]
+    stems = sorted(split["train"] + split["test"])
+    done = set(part1) | set(part2) | wide.EXAMPLE_TEST
+    rest = sorted(s for s in stems if s not in done)
+    return rest[: len(rest) // 2], rest[len(rest) // 2:]
 
 
 CAPTURE_PATCH = r'''_cap_src = _blend_path.read_text()
@@ -331,10 +352,10 @@ def replace_once(cells, old, new):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--part", type=int, choices=(1, 2), required=True)
+    ap.add_argument("--part", type=int, choices=(1, 2, 3, 4), required=True)
     args = ap.parse_args()
-    part1, part2 = video_parts()
-    stems = part1 if args.part == 1 else part2
+    parts = [*video_parts(), *rest_parts()]
+    stems = parts[args.part - 1]
     headfit = load("headfit", REPO / "scripts" / "build_headfit_kernel.py")
 
     nb = json.loads(BASE.read_text(encoding="utf-8"))
