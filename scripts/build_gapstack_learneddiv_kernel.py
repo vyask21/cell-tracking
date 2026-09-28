@@ -7,6 +7,10 @@
 A --tau other than 0.01 writes a separately named probe kernel, learneddiv-tau005
 and so on, leaving exp 30's files untouched.
 
+--name v2 with the model retrained on all four capture parts, 195 videos and 64
+positives, writes cell-tracking-plateau-learneddiv-v2; exp 30's files are rebuilt
+from --model artifacts/divmodel/divmodel_exp30.json.
+
 --base ens5 applies the same change on top of the exp 29 five-seed head ensemble
 instead of exp 25, for the combination run if both bets pay.
 
@@ -107,12 +111,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tau", type=float, default=None, help="override the fitted threshold")
     ap.add_argument("--base", choices=("blend", "ens5"), default="blend")
+    ap.add_argument("--model", default=None, help="model json; default artifacts/divmodel/divmodel.json")
+    ap.add_argument("--name", default=None, help="suffix for a separately named kernel, e.g. v2")
     args = ap.parse_args()
     base, out_dir, kernel_id = BASE, OUT_DIR, KERNEL_ID
     if args.tau is not None and args.tau != 0.01:
         tag = f"tau{round(args.tau * 1000):03d}"
         out_dir = REPO / "notebooks" / f"plateau_learneddiv_{tag}"
         kernel_id = f"vyask21/cell-tracking-plateau-learneddiv-{tag}"
+    if args.name:
+        out_dir = REPO / "notebooks" / f"plateau_learneddiv_{args.name}"
+        kernel_id = f"vyask21/cell-tracking-plateau-learneddiv-{args.name}"
     if args.base == "ens5":
         base = REPO / "notebooks" / "plateau_gapstack_head_ens5" / "gapstack_head_ens5.ipynb"
         out_dir = REPO / "notebooks" / "plateau_ens5_learneddiv"
@@ -126,7 +135,7 @@ def main() -> int:
     if rows_fn.count("def _div_rows(") != 1:
         raise SystemExit("could not derive the row function")
 
-    model = json.loads(MODEL.read_text(encoding="utf-8"))
+    model = json.loads((Path(args.model) if args.model else MODEL).read_text(encoding="utf-8"))
     if args.tau is not None:
         model["tau"] = args.tau
     model["model_z"] = base64.b64encode(zlib.compress(model["model_str"].encode(), 9)).decode()
