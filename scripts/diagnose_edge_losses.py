@@ -73,7 +73,7 @@ def analyse(sample, data_dir, cfg):
     p_zyx, p_t = graph.nodes.zyx(), np.asarray(graph.nodes.t)
     gt_pos = {int(v): k for k, v in enumerate(gt_ids)}
 
-    # GT node -> matched pred node id, solved per timepoint the way the scorer does.
+    # GT node to matched pred node id, solved per timepoint the way the scorer does.
     matched: dict[int, int] = {}
     for t in np.unique(gt_t):
         g_idx = np.flatnonzero(gt_t == t)

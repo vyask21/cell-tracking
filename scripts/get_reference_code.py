@@ -41,7 +41,7 @@ def main() -> int:
 
     if not os.path.exists(os.path.join(args.dest, ".git")):
         os.makedirs(os.path.dirname(os.path.abspath(args.dest)), exist_ok=True)
-        print(f"cloning {REPO} -> {args.dest}")
+        print(f"cloning {REPO} to {args.dest}")
         run(["git", "clone", "--quiet", REPO, args.dest])
 
     run(["git", "-C", args.dest, "fetch", "--quiet", "origin", args.commit])

@@ -16,8 +16,8 @@ take the same number of gradient steps. The only difference is whether the
 training set contains videos from the test embryo.
 
     test set T     35 44b6 videos, identical for both runs
-    split 0        train = 128 6bba              -> has never seen 44b6
-    split 1        train = 92 6bba + 36 44b6     -> has seen 44b6, but not T
+    split 0        train = 128 6bba              so it has never seen 44b6
+    split 1        train = 92 6bba + 36 44b6     so it has seen 44b6, but not T
 
 Holding the test set fixed is the part that matters. The obvious design, comparing
 leave-one-embryo-out against the pack's random split, varies the test set as well
@@ -115,7 +115,7 @@ def main() -> None:
     for f in folds:
         seen = "unseen" if TEST_EMBRYO not in embryos(f["train"]) else "SEEN"
         print(f"  split {f['split']} train: {len(f['train'])} videos "
-              f"{embryos(f['train'])}  -> test embryo {seen}")
+              f"{embryos(f['train'])}, test embryo {seen}")
     print("\nBoth runs must use the same --epochs and --max-iters. The comparison "
           "is\nthe difference between them, not either number on its own.")
 

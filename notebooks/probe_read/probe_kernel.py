@@ -122,7 +122,7 @@ def main():
         print("  read %.2fs  detect %.2fs" % (t_read, t_detect))
         for thr in thresholds:
             ratio = counts[thr] / target if target else float("nan")
-            print("    thr=%.1f -> %6d detections  (%.2f x true count)"
+            print("    thr=%.1f: %6d detections  (%.2f x true count)"
                   % (thr, counts[thr], ratio))
 
         row = {
