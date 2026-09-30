@@ -6,7 +6,7 @@ greedy selection. Re-implementing a loop is exactly where a silent divergence
 gets in: the feature map is indexed with downsampled coordinates, the
 transformer's distance term takes full resolution ones, and the positional
 embedding uses window-relative time. Any of those being wrong produces
-plausible probabilities that are quietly not the pack's.
+plausible probabilities that are silently not the pack's.
 
 So this runs both on the same frames of the same video and compares the
 detections and the edge probabilities directly. It is a correctness check, not a

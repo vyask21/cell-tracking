@@ -30,7 +30,7 @@ from src.pipeline import predict_sample
 
 
 def _missing_dir_report(test_dir: str, root: str = "/kaggle/input") -> str:
-    """Explain a missing test directory by listing what is actually mounted.
+    """Explain a missing test directory by listing what is mounted.
 
     A bare FileNotFoundError from os.listdir cost three round trips on the calib
     kernel of 2026-08-28. The cause was a Kaggle kernel record that listed the
@@ -44,7 +44,7 @@ def _missing_dir_report(test_dir: str, root: str = "/kaggle/input") -> str:
         lines.append(f"{root} does not exist either, so this is not a Kaggle rerun")
         return "\n".join(lines)
 
-    lines.append(f"what is actually under {root}:")
+    lines.append(f"what is under {root}:")
     try:
         entries = sorted(os.listdir(root))
     except OSError as exc:

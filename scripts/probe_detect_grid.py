@@ -2,7 +2,7 @@
 
 Why this exists. The thr030 sweep cut `threshold_scale` by 40% and moved node
 counts by 0.5% and 1.2%. A detector that were threshold-limited would respond far
-more than that, so NOTES.md names `detect.min_sep_um: 3.0` as the suspected binding
+more than that, so `detect.min_sep_um: 3.0` is as the suspected binding
 constraint: non-maximum suppression at a 3 um radius caps how many peaks a frame
 can emit no matter how low the acceptance threshold goes. That is a hypothesis
 consistent with node counts, not a measured result, and a full leave-one-embryo-out
@@ -134,7 +134,7 @@ def _distances(
 def node_hits(dist: np.ndarray) -> int:
     """GT nodes with *any* detection within the 7 um cap.
 
-    Deliberately not the scorer's number, and it degenerates as detections get
+    Not the scorer's number, and it degenerates as detections get
     dense: a 104 um cube holding 2,000 detections has a mean spacing near 3 um, so
     almost every GT node has something inside 7 um whether or not the detector
     found that cell. Kept only as the optimistic bound to compare `node_matched`
@@ -234,7 +234,7 @@ def main() -> None:
                         dist = _distances(det, gt, image.scale)
                     else:
                         dist = np.empty((0, 0))
-                    # Record the footprint actually used, because the micron value
+                    # Record the footprint used, because the micron value
                     # alone does not identify the setting.
                     fp = _odd(np.asarray(min_sep, dtype=np.float64) / np.asarray(image.scale))
                     writer.writerow(

@@ -9,8 +9,7 @@ detections to ground truth, and regress the displacement with a 224-32-3 MLP who
 output is bounded to 2 um. This kernel does that on our side.
 
 What differs from the published recipe, on purpose: the capture runs on the 19
-videos the support pack held out of its 90/10 split, listed in NOTES.md
-2026-08-20. Those are out of sample for the U-Net whose features the head reads,
+videos the support pack held out of its 90/10 split, listed below as HELD_OUT_19. Those are out of sample for the U-Net whose features the head reads,
 so the fit does not learn the network's behaviour on its own training data. That
 is the defect that cost exp 13.
 
@@ -172,7 +171,7 @@ HEADER = """# Coordinate head fit
 Built by `scripts/build_headfit_kernel.py`. Captures detector features on the 19
 videos the support pack held out, fits the coordinate head, reports
 leave-one-video-out distance to ground truth, and saves `coord_head.pt` for the
-exp 19 submission kernel. Sources and credit are in `NOTES.md`, 2026-09-23.
+exp 19 submission kernel.
 """
 
 

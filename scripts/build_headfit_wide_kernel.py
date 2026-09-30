@@ -12,7 +12,7 @@ This capture adds 40 videos from the pack's training 180, drawn with a fixed see
 and weighted to 44b6, 25 against 15, so the set is 30 and 29 by embryo. The four
 videos that also sit in the example test folder are excluded.
 
-Evaluation stays honest by construction: every head is scored only on the 19
+Evaluation stays out of sample by construction: every head is scored only on the 19
 held-out videos, leaving one out at a time, because the hidden test is unseen by
 the U-Net and only those 19 match that. The 40 in-sample videos are training data
 only, never test data.
@@ -165,7 +165,7 @@ HEADER = """# Coordinate head fit, wide capture
 Built by `scripts/build_headfit_wide_kernel.py`. Captures detector features on 59
 training videos, the support pack's held-out 19 plus 40 from its training set,
 fits coordinate heads, and scores every head only on the held-out 19, one video
-left out at a time. Sources and credit are in `NOTES.md`, 2026-09-23.
+left out at a time.
 """
 
 

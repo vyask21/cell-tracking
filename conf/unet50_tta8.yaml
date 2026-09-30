@@ -10,8 +10,7 @@
 # features and the DeepCenter gate. Together that is +0.006 of the public
 # plateau, produced by inference-time averaging alone.
 #
-# Why this config is first in the queue. It has no learned parameters. NOTES.md
-# records that property as the one separating the steps that transferred to the
+# Why this config is first in the queue. It has no learned parameters. That property was as the one separating the steps that transferred to the
 # leaderboard at face value from the ones that transferred at 16%. It is also
 # the only entry in the comparison table where this repo has the feature
 # switched off entirely rather than set to a different value.

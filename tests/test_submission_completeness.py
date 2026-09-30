@@ -118,7 +118,7 @@ def test_placeholder_is_an_in_volume_coordinate(tmp_path):
     The public-leaderboard hack appends nodes at sentinel coordinates outside any
     real volume (t=-1000, z=y=x=-10000) to inflate the division term. The
     placeholder here exists only to keep a dataset present and must stay an
-    honest, in-volume, non-negative voxel.
+    valid, in-volume, non-negative voxel.
     """
     out = str(tmp_path / "sub.csv")
     write_submission({}, out, datasets=["collapsed"])
@@ -131,7 +131,7 @@ def test_placeholder_is_an_in_volume_coordinate(tmp_path):
 
 
 def test_placeholder_contributes_no_edges(tmp_path):
-    """A backfilled dataset scores zero honestly rather than inventing structure."""
+    """A backfilled dataset scores zero instead of inventing structure."""
     out = str(tmp_path / "sub.csv")
     write_submission({}, out, datasets=["collapsed"])
 
@@ -217,7 +217,7 @@ def test_predict_run_survives_a_sample_that_raises(tmp_path, monkeypatch, capsys
 
 
 def test_predict_run_survives_every_sample_raising(tmp_path, monkeypatch):
-    """Even a total wipeout produces a valid, honest, zero-scoring submission."""
+    """Even a total wipeout produces a valid, zero-scoring submission."""
     from src import predict
 
     test_dir = tmp_path / "test"

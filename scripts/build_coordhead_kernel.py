@@ -66,7 +66,6 @@ Built by `scripts/build_coordhead_kernel.py`. The exp 18 notebook with one chang
 the coordinate-refinement module runs with a linear head fitted on the support
 pack's held-out 19 videos, embedded below. `scripts/fit_coord_head_linear.py`
 fits it and records the held-out evidence.
-Sources and credit are in `NOTES.md`, 2026-09-23.
 """
 
 

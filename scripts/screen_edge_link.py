@@ -2,11 +2,11 @@
 
 Generalises `screen_unet_heldout.py`: that one hard-wires the local-max baseline
 against `conf/unet50.yaml`, this one runs any config through
-`src.pipeline.predict_sample`, which is the path a submission actually takes, and
+`src.pipeline.predict_sample`, which is the path a submission takes, and
 compares against every cached arm it can find.
 
-The 19 are the only honest samples for anything built on these weights, and even
-they are honest only in a limited sense. They are video-disjoint from the pack's
+The 19 are the only out-of-sample videos for anything built on these weights, and even
+they are out of sample only in a limited sense. They are video-disjoint from the pack's
 training set but they are **not embryo-disjoint**: the pack trained on 180 videos
 drawn from these same two embryos, while the hidden test set is embryo-disjoint.
 Exp 4 measured what that costs. A +0.1270 here arrived as +0.0200 on the

@@ -3,7 +3,7 @@
 The kernel selects an arm when its proxy score beats base by a margin. That is a
 point estimate on a single set and it is the rule that let a seven arm sweep
 report five arms within 0.00002 of each other as though they were results. This
-repo's bar is the one written in CLAUDE.md and used since 2026-08-31:
+repo's bar, used since 2026-08-31:
 
     a paired bootstrap interval clear of zero, AND both embryos positive.
 
@@ -127,7 +127,7 @@ def main() -> None:
     ap.add_argument("--base", default="base")
     ap.add_argument("--out", default="artifacts/plateau_screen/arm_screen.csv")
     ap.add_argument("--n", type=int, default=20000, help="bootstrap resamples")
-    ap.add_argument("--seed", type=int, default=0, help="fixed and recorded, per CLAUDE.md")
+    ap.add_argument("--seed", type=int, default=0, help="fixed and recorded")
     args = ap.parse_args()
 
     by_arm = load_rows(args.results)

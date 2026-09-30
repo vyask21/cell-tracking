@@ -62,7 +62,7 @@ def quantiles(sample):
 def detect(frame, q, sigma_um=2.0, min_sep_um=4.0, thresholds=(0.2, 0.4, 0.6, 0.8)):
     """Smooth, then take local maxima above a threshold, at several thresholds.
 
-    Returns {threshold: n_detections}. Deliberately the dumbest thing that could
+    Returns {threshold: n_detections}. The dumbest thing that could
     work: the point is to see how detection count moves with threshold relative to
     the true cell count, not to be good yet.
     """

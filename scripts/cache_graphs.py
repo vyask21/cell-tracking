@@ -10,7 +10,7 @@ The same trick paid for the `max_link_um` screen on 2026-08-18, where detection
 ran once and five caps shared it. It is worth more here, because the chain has
 six or seven steps and each needs its own arm.
 
-**What is cached and what is deliberately not.** Detections and edge affinities
+**What is cached and what is not.** Detections and edge affinities
 are cached. The ILP is not, because several planned arms change its input: the
 edge-length gate is one of the settings under test. The ILP costs seconds on most
 videos and up to ten minutes on the largest, which is acceptable per arm; the

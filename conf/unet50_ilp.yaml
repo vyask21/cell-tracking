@@ -14,7 +14,7 @@
 # Divisions: the ILP handles them as a constraint rather than through
 # `add_divisions`, so `max_division_um` does not apply here. `division_weight`
 # is the price of a fork. The pack's default of 1.0 is kept, since the division
-# term is bounded at 0.02 to 0.04 in NOTES.md and this config is not the place
+# term is bounded at 0.02 to 0.04 and this config is not the place
 # to reopen it.
 name: unet50_ilp_link
 seed: 42

@@ -9,7 +9,7 @@ exactly the situation where a silent divergence produces a screen that compares
 one arm's detections against another arm's, so both import these functions rather
 than each carrying a copy.
 
-The format is deliberately plain: concatenated arrays plus per-frame counts, no
+The format is plain: concatenated arrays plus per-frame counts, no
 object arrays and no pickle, so it loads under `np.load` with default settings on
 any numpy the Kaggle image happens to ship.
 """

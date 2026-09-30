@@ -22,8 +22,8 @@ import sys
 REPO = "https://github.com/royerlab/kaggle-cell-tracking-competition.git"
 
 # Pinned. 2026-07-17, "Merge pull request #2 from royerlab/metrics-fix" - the
-# commit that hardened the division metric. Bump deliberately and note it in
-# NOTES.md, because it can move every CV number.
+# commit that hardened the division metric. Bump it and note it in
+# the ledger, because it can move every CV number.
 COMMIT = "075fc5f5a52d11077f9dc2b074644618f26939e2"
 
 DEST = os.path.join("external", "kaggle-cell-tracking-competition")

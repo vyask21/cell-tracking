@@ -374,7 +374,7 @@ def main() -> int:
                   "source": label.lstrip().splitlines(keepends=True)})
     cells[0]["source"] = [
         f"# Division candidates and head features, part {args.part}\n", "\n",
-        "Built by `scripts/build_divcapture_kernel.py`. Sources and credit are in `NOTES.md`.\n",
+        "Built by `scripts/build_divcapture_kernel.py`.\n",
     ]
     nb["cells"] = cells
     for i, c in enumerate(cells):

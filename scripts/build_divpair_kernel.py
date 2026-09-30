@@ -41,7 +41,7 @@ with P=0.560. It no longer endorses the arm that lost. That is not proof the
 instrument tracks the leaderboard, but it is the first evidence any instrument
 here has offered.
 
-The remaining honest position is that this is a probe rather than a validated
+What remains is that this is a probe and not a validated
 gain, and the leaderboard is now the better instrument for it. Cost of being
 wrong is one submission and a rerun; public rank cannot fall, because the board
 keeps the best submission and ours is exp 12 at 0.947.

@@ -37,7 +37,7 @@
 #
 # PREDICTION, recorded before the leaderboard sees it. This should transfer at
 # or above face value rather than at the 86% the calibration chain managed. The
-# node count term is the one place NOTES.md already records the held-out 19 as
+# node count term is the one place the held-out 19 were already known to be
 # systematically under-reading: exp 6 moved it by +0.0006 locally and +0.005 on
 # the leaderboard. The step also has no learned parameters, which is the
 # property that separated the 86% transfers from the 16% ones. What would

@@ -113,7 +113,7 @@ def main() -> int:
             replace_once(cells, old, new)
     cells[0]["source"] = [
         f"# Plateau, public gap-fill stack, {TITLES[args.probe]}\n", "\n",
-        "Built by `scripts/build_gapstack_variant_kernel.py`. Sources and credit are in `NOTES.md`.\n",
+        "Built by `scripts/build_gapstack_variant_kernel.py`.\n",
     ]
     for i, c in enumerate(cells):
         if c["cell_type"] == "code":

@@ -132,7 +132,7 @@ ARMS: dict[str, dict] = {
     #
     # Every arm in the 2026-08-20 screen was measured on top of a partial chain.
     # Gap closing lost 85% of its measured value once the short-track filter
-    # arrived, and NOTES.md records the open worry that `prune`, `short6` and
+    # arrived, and the open worry is that `prune`, `short6` and
     # `smooth` may be carrying similarly inflated numbers. These arms move one
     # setting at a time against `v9`, which is exactly conf/unet50_calib_div_gap5
     # and therefore has a leaderboard score of 0.878 behind it.
@@ -279,8 +279,8 @@ ARMS: dict[str, dict] = {
     "v11_br5_short6": V11 | {"min_branch_len": 5, "min_track_len": 6},
     "v11_br5_short8": V11 | {"min_branch_len": 5, "min_track_len": 8},
 
-    # Objective arms. SUPERSEDED 2026-09-14 and kept only so the numbers in
-    # NOTES.md have their definitions. Every arm below sets min_track_len 6 with
+    # Objective arms. SUPERSEDED 2026-09-14 and kept only so the ledger's numbers
+    # have their definitions. Every arm below sets min_track_len 6 with
     # no division gates, which was the submission candidate when they were
     # written and has been two chain steps stale since exp 8. Division tp is 0
     # and fn is 19 across all of them, so the division term, a tenth of the
@@ -313,7 +313,7 @@ ARMS: dict[str, dict] = {
     # Objective arms on V11, which is conf/unet50_divsym.yaml, exp 11, LB 0.892.
     # Use `v11` as the reference arm, never `all`.
     #
-    # v11_div12 is the one genuinely unexplored direction. The division weight
+    # v11_div12 is the one unexplored direction. The division weight
     # was screened on 2026-09-01 at 0.9, 0.8, 0.65, 0.5, 0.35 and 0.2 and
     # rejected monotonically, but every one of those is BELOW 1.0. The 0.947
     # public notebook runs BIOHUB_ILP_DIVISION_WEIGHT at 1.2. The axis has only
@@ -434,7 +434,7 @@ def run_one(arm: str, cfg: dict, sample: str, cache_dir: str, data_dir: str,
     # is the output cap applied by `enforce_edge_rules`; the gate is the radius
     # the candidate set is narrowed to before the solve. Tying them meant every
     # cap value needed its own 20-minute solve, and it also confounded two
-    # variables: a cap arm was really testing "narrower candidates AND a
+    # variables: a cap arm was testing "narrower candidates AND a
     # narrower output filter". An arm that sets `gate_um` keeps the cached solve
     # and moves the cap alone.
     gate = float(cfg.get("gate_um", cfg.get("max_edge_um", 7.0)))
@@ -521,8 +521,7 @@ def division_jaccard(rows: list[dict]) -> float:
     Not a weighted mean of per-sample division Jaccards. Divisions are rare
     enough that most samples have a denominator of a handful or of zero, so
     averaging per sample would let a sample with one division and one hit count
-    as much as a sample with thirty. `NOTES.md` records the distinction; this is
-    the code that has to honour it.
+    as much as a sample with thirty. This is the code that honours the distinction.
     """
     tp = sum(int(r["division_tp"]) for r in rows)
     fp = sum(int(r["division_fp"]) for r in rows)

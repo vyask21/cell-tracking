@@ -64,7 +64,7 @@ link:
   # Left at the pack's values on purpose. The public 0.927 runs appearance 0.0
   # and disappearance 1.5; screened on 2026-08-28 those were rejected, appearance
   # being inert and disappearance splitting the embryos, 44b6 -0.0158 against
-  # 6bba +0.0063. See NOTES.md.
+  # 6bba +0.0063.
   ilp_appearance_weight: 0.1
   ilp_disappearance_weight: 0.1
   ilp_division_weight: 1.0

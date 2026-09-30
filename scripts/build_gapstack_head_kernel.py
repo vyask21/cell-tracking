@@ -9,8 +9,7 @@ the source as published, head on, with the same name sanitising as exp 18.
 
 The only change beyond sanitising is the head lookup, which finds the file by its
 own name rather than by the dataset slug, keeping the exactly-one guard. The
-dataset appears in kernel-metadata.json because Kaggle needs it to mount; credit
-is in NOTES.md.
+dataset appears in kernel-metadata.json because Kaggle needs it to mount.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ HEAD_ON = (
     "_myhead = sorted(Path('/kaggle/input').rglob('v1284_head.pt'))\n"
     "if len(_myhead) != 1:\n"
     "    raise RuntimeError(('coordinate head mount mismatch', [str(p) for p in _myhead]))\n"
-    "# The published head, now in a public dataset; credited in NOTES.md.\n"
+    "# The published head, now in a public dataset.\n"
     "os.environ['V1284_MODE']='candidate'\n"
     "os.environ['V1284_HEAD']=str(_myhead[0])\n"
 )
@@ -42,8 +41,7 @@ HEAD_ON = (
 HEADER = """# Plateau, public gap-fill stack with its published coordinate head
 
 Built by `scripts/build_gapstack_head_kernel.py`. Public work run as published,
-with names removed from comments and report strings. Sources and credit are in
-`NOTES.md`.
+with names removed from comments and report strings.
 """
 
 

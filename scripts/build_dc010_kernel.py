@@ -28,7 +28,7 @@ pooled Jaccard rises only while each newly admitted division is about half right
 Four patches, and the third is the one to read carefully.
 
 1. `MOTION_RELINK_TIGHT_UM` 6.0 to 5.5, which is what the anchor's own sweep
-   selected and therefore what exp 12 actually shipped. Folding it in is what
+   selected and therefore what exp 12 shipped. Folding it in is what
    makes this a one-variable change rather than a two-variable one.
 2. The threshold itself.
 3. The anchor's configuration guard pins that threshold at 0.20 in

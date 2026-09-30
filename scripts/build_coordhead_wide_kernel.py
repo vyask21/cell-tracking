@@ -45,8 +45,7 @@ HEADER = """# Plateau, public gap-fill stack, wide MLP coordinate head
 
 Built by `scripts/build_coordhead_wide_kernel.py`. The exp 18 notebook with one
 change: the coordinate-refinement module runs with the MLP head fitted on 59
-videos by the `cell-tracking-plateau-headfit-wide` kernel. Sources and credit are
-in `NOTES.md`, 2026-09-23.
+videos by the `cell-tracking-plateau-headfit-wide` kernel.
 """
 
 

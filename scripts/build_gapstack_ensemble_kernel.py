@@ -60,7 +60,7 @@ def main() -> int:
     hits[0]["source"] = "".join(hits[0]["source"]).replace(ANCHOR, ENSEMBLE_CODE + ANCHOR).splitlines(keepends=True)
     nb["cells"][0]["source"] = [
         "# Plateau, public gap-fill stack, published head blended with a five-seed MLP ensemble\n", "\n",
-        "Built by `scripts/build_gapstack_ensemble_kernel.py`. Sources and credit are in `NOTES.md`.\n",
+        "Built by `scripts/build_gapstack_ensemble_kernel.py`.\n",
     ]
     for i, c in enumerate(nb["cells"]):
         if c["cell_type"] == "code":

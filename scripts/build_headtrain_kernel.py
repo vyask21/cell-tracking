@@ -145,7 +145,7 @@ def main() -> int:
         "cells": [
             {"cell_type": "markdown", "metadata": {}, "source": [
                 "# Coordinate head ensemble training\n", "\n",
-                "Built by `scripts/build_headtrain_kernel.py`. Sources and credit are in `NOTES.md`.\n"]},
+                "Built by `scripts/build_headtrain_kernel.py`.\n"]},
             {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
              "source": code.lstrip().splitlines(keepends=True)},
         ],

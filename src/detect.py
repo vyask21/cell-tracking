@@ -12,7 +12,7 @@ nothing costs nothing on the edge term, because an edge only counts as a false
 positive when one of its endpoints matched an annotated ground-truth node. Surplus
 nodes are charged only through `1 - 0.1 * (N_pred - N_true) / N_true`, so doubling
 the node count costs 10%. Missing a real cell costs edge recall outright. So this
-deliberately errs toward over-detection.
+errs toward over-detection.
 
 Everything spatial is specified in microns and converted to voxels here. The data
 is strongly anisotropic, 1.625 um in Z against 0.40625 in Y and X, so a radius that

@@ -1,4 +1,4 @@
-"""What can the competition rerun environment actually import?
+"""What can the competition rerun environment import?
 
 Runs with internet DISABLED, which is how the competition reruns a submitted
 notebook. Anything missing here has to be shipped as an attached Kaggle dataset,

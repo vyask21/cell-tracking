@@ -54,7 +54,7 @@
 #
 # Not in this config, and both measured: letting the ILP price divisions is worse
 # at every weight from 0.9 down to 0.2, and the dangling-branch filter is inert
-# here, moving 1,063 nodes of 347,869. See NOTES.md 2026-09-01.
+# here, moving 1,063 nodes of 347,869.
 name: unet50_ilp_calib_div_gap5_short10_divsym
 seed: 42
 

@@ -1,7 +1,7 @@
 """The cross-cache comparison has to stay paired and refuse a ragged pair.
 
 This script decides whether a change to the detections ships, and the one way it
-could be quietly wrong is by comparing two different sets of samples. An unpaired
+could be silently wrong is by comparing two different sets of samples. An unpaired
 comparison on 19 videos whose scores span 0.85 to 0.98 would produce an interval
 wide enough to accept almost anything.
 """

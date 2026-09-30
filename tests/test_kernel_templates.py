@@ -72,14 +72,14 @@ def test_the_training_script_installs_the_solver_and_never_seeds_from_the_pack()
     assert "--unet-weights" not in argv
     assert "--splits" in argv and "--split" in argv
 
-    # And the fold must refuse to run if it is not actually embryo-disjoint,
+    # And the fold must refuse to run if it is not embryo-disjoint,
     # since the reference trainer's fallback is a seeded 90/10 over all 199.
     assert "should be embryo-disjoint" in code
     assert "raise SystemExit" in code
 
 
 def test_the_matched_leak_run_may_share_an_embryo_but_never_a_video():
-    """The leak measurement's split 1 shares an embryo deliberately.
+    """The leak measurement's split 1 shares an embryo on purpose.
 
     Split 0 trains on 6bba only and split 1 swaps 36 of those videos for 44b6
     ones, with both evaluated on the same 35 44b6 videos. Sharing the embryo is
@@ -124,7 +124,7 @@ def test_the_cache_script_settings_match_the_cache_it_is_compared_against():
     `data/meta/graph_cache_t099` was built at threshold 0.99, pool 5 um, gate
     20 um and edge threshold 0.05. A screen comparing a TTA arm against it is
     only a one-variable comparison if those four agree, and a mismatch would not
-    raise anywhere: it would just quietly measure two changes at once.
+    raise anywhere: it would just silently measure two changes at once.
     """
     from src.graphcache import HELDOUT
 

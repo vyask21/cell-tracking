@@ -153,7 +153,7 @@ def match_consecutive_learned(
 ) -> list[tuple[int, int]]:
     """Optimal one-to-one assignment on learned affinity instead of distance.
 
-    Deliberately the same solver, the same drop-after-solve rule and the same
+    The same solver, the same drop-after-solve rule and the same
     candidate set as `match_consecutive`. The only thing that changes is what a
     pair costs: physical distance there, `-log(p)` here. One variable.
 
@@ -199,7 +199,7 @@ def link_sequence_learned(
 
     Divisions still go through `add_divisions` on distance. The edge head scores
     pairs, so it has an opinion about which parent a daughter belongs to, but the
-    division term is bounded at 0.02 to 0.04 in NOTES.md and is off in every
+    division term is bounded at 0.02 to 0.04 and is off in every
     config, so wiring a second path for it would be untested code in the way.
     """
     offsets: list[int] = []

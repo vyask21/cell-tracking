@@ -4,10 +4,8 @@
 
 The source is a public notebook whose own page shows a public score of 0.953, read
 2026-09-23. That is a kernel-level score, not an author-level one, and the same
-check read the exp 17 source at 0.948 before exp 17 scored exactly that. Source,
-authorship and the component lineage are credited in NOTES.md 2026-09-23. This
-file and the notebook it writes deliberately carry no competitor names or notebook
-titles, per the naming rule in the workspace CLAUDE.md.
+check read the exp 17 source at 0.948 before exp 17 scored exactly that. This
+file and the notebook it writes carry no competitor names or notebook titles.
 
 The source cannot run as published. It loads a small learned coordinate head from
 a private dataset and raises if the file is absent. The module ships its own
@@ -57,9 +55,9 @@ PATCHES: list[tuple[str, str, str, int]] = [
     ("version tag in a comment",
      r"x1\d\d v1 FAILED SILENTLY: my", "An earlier version FAILED SILENTLY: the", 1),
     ("guard report attribution string",
-     r'"method_attribution": "[^"]*"', '"method_attribution": "credited in NOTES.md"', 1),
+     r'"method_attribution": "[^"]*"', '"method_attribution": "public work"', 1),
     ("guard report source string",
-     r'"source_kernel": "[^"]*"', '"source_kernel": "credited in NOTES.md"', 1),
+     r'"source_kernel": "[^"]*"', '"source_kernel": "public work"', 1),
     ("coordinate head off: the published head is in a private dataset",
      r"_myhead = sorted\(.*?\n(?:.*\n)*?os\.environ\['V1284_HEAD'\]=str\(_myhead\[0\]\)\n",
      "# Coordinate head OFF. The published run loads a learned head from a private\n"
@@ -73,7 +71,7 @@ HEADER = """# Plateau, public gap-fill stack, coordinate head off
 Built by `scripts/build_gapstack_kernel.py`, which holds every change and the
 reason for it. This is public work run with one necessary change: the learned
 coordinate head it loads is in a private dataset, so the module's own passthrough
-mode is used instead. Sources and credit are in `NOTES.md`, 2026-09-23.
+mode is used instead.
 """
 
 

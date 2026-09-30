@@ -59,7 +59,7 @@ os.environ["CELLMOT_PACK_DIR"] = PACK
 import subprocess
 
 # ilpy is listed explicitly rather than left to resolve as a dependency of
-# tracksdata. The ILP linker fails without it, and a resolver that quietly
+# tracksdata. The ILP linker fails without it, and a resolver that silently
 # decides it is optional would surface as a crash 3 hours into a 12 hour rerun.
 subprocess.run(
     ["pip", "install", "--no-index", "--find-links", os.path.join(PACK, "wheels"),
@@ -95,7 +95,7 @@ def find_code_dir():
 
     The mount layout is not stable across Kaggle's own conventions: datasets have
     turned up at both /kaggle/input/<slug> and /kaggle/input/datasets/<user>/<slug>.
-    Searching for the file we actually need is immune to that, and to anyone
+    Searching for the file we need is immune to that, and to anyone
     renaming the dataset later.
     """
     candidates = [
@@ -184,7 +184,7 @@ def stage_dataset(staging: Path, user: str, cfg) -> Path:
         # 90/10 shuffle over all 199 videos, which puts crops of the same embryo
         # on both sides and is the exact measurement the retrain exists to
         # avoid. A missing file must therefore be loud, and it is checked for in
-        # the training template rather than left to fail quietly here.
+        # the training template rather than left to fail silently here.
         for split_name in ("dataset_splits.json", "leak_splits.json"):
             splits = REPO_ROOT / "data" / "meta" / split_name
             if splits.exists():
@@ -316,7 +316,7 @@ CPU. That makes it an overnight job here against a couple of hours on a T4. The
 cache is the only expensive artifact; once it lands, every calibration arm that
 reads it is graph surgery and runs locally for free.
 
-The gate is deliberately wide. Narrowing a cached candidate set gives exactly the
+The gate is wide. Narrowing a cached candidate set gives exactly the
 set that gating at that value would have produced, because the gate is a pure
 distance filter applied after the probabilities were computed, so one wide cache
 serves every narrower arm. Baking a narrow gate in here would bake in a setting
@@ -582,7 +582,7 @@ if {require_disjoint} and overlap:
 print(f"fold {split} shares embryos with its test set: {{sorted(overlap)}}",
       flush=True)
 
-# Drop any video the mount does not actually carry. The reference loader raises
+# Drop any video the mount does not carry. The reference loader raises
 # FileNotFoundError on the first missing image and takes the whole run with it,
 # which cost a 48 minute job for one absent file. A split is a list of names
 # written on another machine, so it is a claim about the mount rather than a
@@ -617,7 +617,7 @@ import torch
 print("cuda:", torch.cuda.is_available(), torch.cuda.get_device_name(0)
       if torch.cuda.is_available() else "", flush=True)
 
-# `--single-gpu` is deliberately NOT passed. Kaggle's T4 allocation reports
+# `--single-gpu` is NOT passed. Kaggle's T4 allocation reports
 # "visible CUDA GPUs: 2" and the trainer will split the UNet across both with
 # DataParallel, which both halves the step time and halves per-GPU memory. The
 # first calibration passed --single-gpu and died at iteration 3 with a CUDA OOM

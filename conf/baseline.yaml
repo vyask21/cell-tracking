@@ -1,8 +1,8 @@
 # The anchor baseline. No learned parameters: smooth, take local maxima, link by
 # optimal assignment on physical distance. Its only job is to prove the pipeline
-# runs end to end and to give every later experiment an honest number to beat.
+# runs end to end and to give every later experiment a reliable number to beat.
 #
-# The detection settings deliberately err toward over-detection. A predicted node
+# The detection settings err toward over-detection. A predicted node
 # that matches nothing costs nothing on the edge term, and surplus nodes are
 # charged only through 1 - 0.1 * (N_pred - N_true) / N_true, so doubling the node
 # count costs 10% while missing a real cell costs edge recall outright.

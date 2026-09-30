@@ -7,7 +7,7 @@
 # detector settings are identical, so any difference is the cost function.
 #
 # Why this and why now. Exp 4 put the learned detector at node recall 0.995 on
-# the honest 19, which bounds edges lost to missing detections at about 1.0 of
+# the held-out 19, which bounds edges lost to missing detections at about 1.0 of
 # the 8.4 percentage points of edge FN. So at least 88% of what is still missing
 # is the linker failing to make a link the detector made possible, against the
 # 12.5% measured at the local-max operating point on 2026-08-18. The linker was
@@ -36,7 +36,7 @@ link:
   # Softmax over source nodes per target, which is the pack's default and what
   # its reported numbers use. `sigmoid` scores each pair independently.
   edge_activation: softmax
-  # Floor on edge probability before a pair is even a candidate. Deliberately
+  # Floor on edge probability before a pair is even a candidate. Kept
   # loose: the assignment is what decides, and a tight floor here would silently
   # remove the solver's options. The pack's greedy selection uses 0.5 because
   # greedy has no way to reconsider.

@@ -54,7 +54,7 @@ def main() -> int:
     nb["cells"][0]["source"] = [
         f"# Plateau, public gap-fill stack, published head, shift scale {args.scale}\n",
         "\n",
-        "Built by `scripts/build_gapstack_scaled_kernel.py`. Sources and credit are in `NOTES.md`.\n",
+        "Built by `scripts/build_gapstack_scaled_kernel.py`.\n",
     ]
     for i, c in enumerate(nb["cells"]):
         if c["cell_type"] == "code":

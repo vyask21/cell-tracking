@@ -1,6 +1,6 @@
 """Reading the images and the ground-truth graphs, and writing a submission.
 
-Deliberately narrow dependencies. The rerun notebook has no internet and a 12 h
+Narrow dependencies. The rerun notebook has no internet and a 12 h
 budget over roughly 200 unseen samples, so the inference path uses zarr and numpy
 and nothing else. `tracksdata`, `geff` and `polars` are needed only for *scoring*,
 which happens locally and never inside the submitted notebook.
@@ -23,8 +23,8 @@ import numpy as np
 # and `numcodecs` are absent and internet is disabled, so there is no installing
 # them; `tensorstore` is present and reads Zarr v3 natively. Verified in
 # notebooks/probe_env and notebooks/probe_read. Prefer zarr when available so the
-# local path stays simple, and fall back to tensorstore, which is what actually
-# runs at submission time.
+# local path stays simple, and fall back to tensorstore, which is what runs at
+# submission time.
 try:
     import zarr
 except ImportError:  # pragma: no cover - exercised on Kaggle, not locally
@@ -239,7 +239,7 @@ def graph_to_submission_rows(graph: Graph, dataset: str) -> list[tuple]:
 
 
 # A dataset that produced nothing still has to appear in the CSV, so it gets one
-# placeholder node. The coordinate is an honest in-volume voxel and deliberately
+# placeholder node. The coordinate is a valid in-volume voxel and
 # not the out-of-volume sentinel used by the metric hack on the public
 # leaderboard. An unmatched predicted node is not an edge false positive; it costs
 # only its share of the node-count penalty, and one node against a per-sample
@@ -288,7 +288,7 @@ def write_submission(
 def verify_submission(out_path: str, datasets: list[str]) -> None:
     """Re-read the written CSV and check every expected dataset is in it.
 
-    Deliberately reads the file back rather than trusting what the writer thinks
+    Reads the file back instead of trusting what the writer thinks
     it did. This is the last line of defence before a 12 h rerun produces a
     submission that scores zero for a reason no local number would have shown.
     Raises rather than returning a flag, because there is no sane way to continue.

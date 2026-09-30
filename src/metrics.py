@@ -205,7 +205,7 @@ def score_with_interval(scores: list[SampleScore], seed: int = 0) -> dict:
 
     Two embryos means leave-one-embryo-out has two folds, so the fold-to-fold
     spread is a two-point estimate and close to useless on its own. Resampling
-    whole samples inside a fold gives an honest interval on that fold's number,
+    whole samples inside a fold gives a valid interval on that fold's number,
     which is the difference between "this change helped" and "this change moved
     the number by less than the noise".
     """

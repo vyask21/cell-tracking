@@ -152,7 +152,7 @@ def main() -> int:
                         "                                        repair_frame_cache, deepcenter_heatmap_cache)\n")
     cells[0]["source"] = [
         "# Plateau, public gap-fill stack, head blend, learned divisions\n", "\n",
-        "Built by `scripts/build_gapstack_learneddiv_kernel.py`. Sources and credit are in `NOTES.md`.\n",
+        "Built by `scripts/build_gapstack_learneddiv_kernel.py`.\n",
     ]
     for i, c in enumerate(cells):
         if c["cell_type"] == "code":

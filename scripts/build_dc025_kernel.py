@@ -24,7 +24,7 @@ behind a prefix guard, so whether any ship depends on their validator. What is
 not conditional is their base, and their base is 0.25.
 
 This is a leaderboard probe, not a validated gain. There is no local number beside
-it and there deliberately is not one: the local instrument has now been wrong
+it and there is not one: the local instrument has now been wrong
 about this exact constant once already, reading exp 13's 0.10 as +0.00333 when it
 was worth -0.002.
 

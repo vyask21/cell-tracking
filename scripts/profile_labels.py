@@ -2,7 +2,7 @@
 
 Answers the questions the CV scheme depends on: how many timepoints each sample
 covers, how many cells are annotated, how many divisions there are, and how the
-organisers' node-count estimate compares to the sparse annotation actually shipped.
+organisers' node-count estimate compares to the sparse annotation shipped.
 
 Writes data/meta/sample_profile.csv.
 """
@@ -43,7 +43,7 @@ def read_geff_meta(path: str) -> dict:
     over-detection penalty. Never recompute it from the GT.
 
     `axes` carries the per-axis min/max of the annotated coordinates, which is a
-    free read and says how much of each volume is actually annotated.
+    free read and says how much of each volume is annotated.
     """
     meta_path = os.path.join(path, "zarr.json")
     out: dict = {"estimated_number_of_nodes": None}

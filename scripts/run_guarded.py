@@ -9,7 +9,7 @@ state while a long run has no keyboard input behind it. A process that wants to
 survive that has to say so, because Windows does not count CPU load as activity.
 `SetThreadExecutionState` is how it says so.
 
-The second is the one that actually happened, twice on 2026-09-16, and it is a
+The second is the one that happened, twice on 2026-09-16, and it is a
 hang rather than a sleep. Kernel-Power event 41 both times. A single ILP solve on
 the largest graphs in this set peaks above 2 GB, this machine has 15.7 GB, and
 the C: pagefile is system managed, which means it grows on demand and a solve
@@ -45,7 +45,7 @@ from ctypes import wintypes
 
 # ES_CONTINUOUS keeps the state set until it is cleared rather than resetting it
 # after one idle check. ES_SYSTEM_REQUIRED is the system sleep lock. The display
-# is deliberately not held: keeping the screen awake for a 70 minute run is rude
+# is not held: keeping the screen awake for a 70 minute run is rude
 # and buys nothing, since the remote session needs the system up and not the
 # panel lit.
 ES_CONTINUOUS = 0x80000000

@@ -2,7 +2,7 @@
 
 The scheme has to mirror how the organisers split train from test. Getting this
 wrong is the single most expensive mistake available in a competition, so the
-choice is explicit here and argued in NOTES.md rather than defaulted.
+choice is explicit here.
 
 The split here is by embryo, because the hidden test set is embryo-disjoint from
 train. Train contains exactly two embryos, so leave-one-embryo-out is two folds
@@ -50,7 +50,7 @@ class Fold:
 
 
 def leave_one_embryo_out(samples: list[str]) -> list[Fold]:
-    """The honest scheme: hold out a whole embryo, train on the rest.
+    """The leak-free scheme: hold out a whole embryo, train on the rest.
 
     This is the only split that asks the question the leaderboard asks. It is
     expensive, since each fold trains on roughly half the data, and it produces

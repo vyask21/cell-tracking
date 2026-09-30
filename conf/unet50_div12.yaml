@@ -19,7 +19,7 @@
 # Edge tp, fp and fn do not move at all.
 #
 # PREDICTION, recorded before the leaderboard sees it. At face value this is
-# +0.0005 and the leaderboard reports three decimals, so the honest expectation
+# +0.0005 and the leaderboard reports three decimals, so the realistic expectation
 # is no visible move. It is worth carrying because it costs nothing and cannot
 # hurt, not because it is the increment this repo needs. Do not spend a
 # submission on it alone.

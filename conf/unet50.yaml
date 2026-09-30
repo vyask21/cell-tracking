@@ -11,8 +11,8 @@
 #
 # Read before trusting any number from this config: the pack was trained on the
 # reference seed-0 90/10 split, which is 180 of the 199 training videos. Scoring
-# it on any of those 180 is leakage. Only the 19 it held out are honest, and they
-# are listed in NOTES.md.
+# it on any of those 180 is leakage. Only the 19 it held out are out of sample, and they
+# are listed as HELD_OUT_19 in scripts/build_headfit_kernel.py.
 name: unet50_localmax_link
 seed: 42
 
@@ -23,7 +23,7 @@ detect:
   backend: unet                # unet | localmax
   # Sigmoid probability a local-max peak must clear. The organisers released
   # 0.99; the public notebooks sit near 0.955 to 0.969 and report this as one of
-  # the few settings that actually moves the score. Chosen on folds, not copied.
+  # the few settings that moves the score. Chosen on folds, not copied.
   det_threshold: 0.9550
   # Local-max suppression distance in microns, applied in the downsampled grid
   # where the voxel is 1.625 um on every axis, so the kernel is 3x3x3.
@@ -38,6 +38,6 @@ detect:
 link:
   # Unchanged from conf/baseline.yaml. The 7 um cap is on node-to-node matching,
   # not edge length, and 7.0 was confirmed as the right value by
-  # scripts/screen_link_cap.py. Divisions stay off on the bound in NOTES.md.
+  # scripts/screen_link_cap.py. Divisions stay off, since their term is bounded at 0.02 to 0.04.
   max_link_um: 7.0
   max_division_um: 0.0

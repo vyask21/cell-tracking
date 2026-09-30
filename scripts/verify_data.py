@@ -52,7 +52,7 @@ def main() -> int:
     for name, want, got in wrong_size[: args.show]:
         print(f"  SIZE    {name}: want {want}, got {got}")
 
-    # Per-sample completeness, which is what actually matters to the CV loop.
+    # Per-sample completeness, which is what matters to the CV loop.
     per_sample = collections.Counter()
     for name in missing:
         parts = name.split("/")

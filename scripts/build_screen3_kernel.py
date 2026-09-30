@@ -32,14 +32,14 @@ rule, that both embryos must improve, made that worse rather than better here,
 because it counted the memorised embryo as corroboration.
 
 So the validator is restricted to 6bba. That is the only ground where a division
-change can be measured honestly, and there are 128 such videos to draw on.
+change can be measured without leakage, and there are 128 such videos to draw on.
 
 `div_dc010` is carried in as a calibration arm and it is the point of the screen
 as much as any new idea. Its leaderboard result is known and it is negative. An
 instrument that still endorses it is still broken, and we should find that out
 here rather than with another submission. On the 6bba half of screen 1 it read
 +0.00269 with a 95% interval of [-0.00154, +0.00881] and P(>0) = 0.652, which is
-inconclusive rather than correct, so the honest hope is that more videos turn
+inconclusive rather than correct, so the hope is that more videos turn
 that into a verdict rather than a shrug.
 
 The rest of the arms are pure geometry in the division proposal stage, each one

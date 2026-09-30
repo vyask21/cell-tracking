@@ -1,11 +1,11 @@
-"""The first honest number for the learned detector.
+"""The first out-of-sample number for the learned detector.
 
 The 50-epoch support pack was trained on the reference seed-0 90/10 split, which
 is 180 of the 199 training videos. Scoring it on any of those 180 measures its
 training set. A single leaked sample scored 0.9286 against the local-max
 baseline's 0.7453, which is exactly the kind of number that starts a bad week.
 
-The 19 videos that split held out are the only honest ones, and they are close to
+The 19 videos that split held out are the only out-of-sample ones, and they are close to
 representative: the local-max baseline scores 0.6813 on them against 0.6876 over
 all 199, off by -0.0063.
 
@@ -14,7 +14,7 @@ the scorer is the organisers' own, and the comparison is against the cached
 baseline scores for the same 19 samples, so the delta is attributable to the
 detector and nothing else.
 
-Nineteen samples is small. The screening-noise table in NOTES.md puts a 20-sample
+Nineteen samples is small. A screening-noise measurement puts a 20-sample
 set at roughly +/- 0.04 on a delta of the size sigma075 produced. That is fine
 here only because the effect being measured is an order of magnitude larger; it
 would not be fine for a tuning decision.

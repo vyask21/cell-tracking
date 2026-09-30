@@ -190,13 +190,13 @@ def detect_sequence_unet(
 
     `det_threshold` is the sigmoid probability a local-max peak must clear. The
     organisers released 0.99; the public notebooks land near 0.955 to 0.969 and
-    report it as one of the two or three settings that actually move the score.
+    report it as one of the two or three settings that move the score.
     It is a config value here for that reason, and it gets chosen on the folds
     rather than copied.
 
     `det_tta` averages detection logits over a dihedral group acting in the YX
     plane, `det_tta_views` of them: 4 for the flips alone, 8 for the full group
-    including quarter turns. Z is deliberately never touched, because the data is
+    including quarter turns. Z is never touched, because the data is
     four times coarser in Z and a Z-flipped volume is out of distribution.
 
     Windows slide with stride `window_size - 1` and each timepoint is detected
@@ -465,7 +465,7 @@ def _edge_probs(
     distance term takes full resolution ones, and the positional embedding uses
     window-relative time normalised by the window rather than the absolute frame
     index. Getting any of those wrong produces plausible numbers that are
-    quietly wrong, which is the failure mode this module exists to avoid.
+    silently wrong, which is the failure mode this module exists to avoid.
     """
     n_src, n_tgt = c_src.shape[0], c_tgt.shape[0]
     p_coords_src = torch.from_numpy(c_src.astype(np.float32)).unsqueeze(0).to(dev)

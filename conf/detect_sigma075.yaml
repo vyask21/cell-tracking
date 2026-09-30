@@ -17,8 +17,8 @@
 # and can create edge false positives that the proxy cannot see, so the first full
 # run takes the more conservative of the two. 0.5 is the follow-up if this lands.
 #
-# Why not min_sep_um instead, which NOTES.md had named as the next experiment.
-# Because it is not a usable continuous knob here. See NOTES.md: the micron value
+# Why not min_sep_um instead, which had been named as the next experiment.
+# Because it is not a usable continuous knob here: the micron value
 # is converted to an odd voxel footprint, and against the 1.625 um Z spacing only
 # two Z footprints are reachable, 3 voxels or 1. At 1 there is no Z suppression at
 # all and one nucleus emits a detection per Z slice.

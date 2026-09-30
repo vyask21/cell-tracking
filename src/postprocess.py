@@ -9,7 +9,7 @@ Our pipeline stopped at the ILP and wrote the CSV. This is the missing half.
 
 Every step here is written to be independently switchable, because the workspace
 rule is one variable per config and because the point is to find out which of
-these actually pay rather than to import a chain wholesale and hope.
+these pay rather than to import a chain wholesale and hope.
 
 The steps, in the order they must run:
 
@@ -38,8 +38,8 @@ The steps, in the order they must run:
    7 um cap, so moving a node a micron closer can flip it from unmatched to
    matched, and matching is what edges are scored on.
 
-Divisions were deliberately absent until 2026-08-29 and are now behind
-`safe_divisions`, off by default. The bound of 0.02 to 0.04 in NOTES.md still
+Divisions were absent until 2026-08-29 and are now behind
+`safe_divisions`, off by default. The bound of 0.02 to 0.04 still
 stands as the ceiling; what changed is that the rest is settled and the term is
 worth 0.1 of the available 1.1, which no submission of ours has ever scored on.
 """

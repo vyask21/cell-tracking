@@ -106,7 +106,7 @@ def predict_sample(
     ilp_fell_back = False
     if link_backend == "ilp":
         # Imported here rather than at module scope so the rerun only needs
-        # tracksdata, ilpy and pyscipopt when a config actually asks for the ILP.
+        # tracksdata, ilpy and pyscipopt when a config asks for the ILP.
         from src.link_ilp import IlpTruncated, link_sequence_ilp
 
         # A time limit is normally a safe degradation. Here it is the opposite.

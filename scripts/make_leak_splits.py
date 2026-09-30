@@ -7,8 +7,8 @@ arriving as +0.0200 on the leaderboard, a 6.3x attenuation, and attributed it to
 the support pack having trained on 180 videos from both of our embryos. One
 observation, one attribution, no control.
 
-A full leave-one-embryo-out retrain would settle it and costs about 348 GPU hours
-(see NOTES.md), which is roughly twelve weeks of Kaggle quota for a competition
+A full leave-one-embryo-out retrain would settle it and costs about 348 GPU hours,
+which is roughly twelve weeks of Kaggle quota for a competition
 with five weeks left. This is the affordable version.
 
 **The design.** Both runs train on 128 videos, evaluate on the same 35 videos, and
