@@ -253,8 +253,7 @@ False divisions are expensive. Each one adds a link the metric counts as a false
 positive when it touches an annotated cell, on top of a false positive in the
 division term. Retraining on 176 videos with 56 positives raised held-out average
 precision from 0.315 to 0.640, yet it scored lower on the private leaderboard: 0.928
-against 0.929 at threshold 0.01, and 0.926 against 0.928 at 0.02. The first model
-shipped.
+against 0.929 at threshold 0.01, and 0.926 against 0.928 at 0.02.
 
 ## Results
 
