@@ -20,6 +20,7 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "cell_tracking_writeup.ipynb"
 OUT_MD = HERE / "cell_tracking_writeup.md"
 NOTEBOOK_URL = "https://www.kaggle.com/code/vyask21/cell-tracking-division-model-and-coordinate-head"
+WRITEUP_URL = "https://www.kaggle.com/competitions/biohub-cell-tracking-during-development/writeups/cell-tracking-lightgbm-division-classifier"
 
 CELLS: list[tuple[str, str, str]] = []
 
@@ -322,7 +323,9 @@ def render_figures() -> None:
 
 def main() -> int:
     cells = []
-    for kind, text, _ in CELLS:
+    for i, (kind, text, _) in enumerate(CELLS):
+        if i == 0:
+            text += f"\n\nThe same text is posted as this competition's solution write-up: {WRITEUP_URL}"
         cell = {"cell_type": kind, "metadata": {}, "source": text.splitlines(keepends=True)}
         if kind == "code":
             cell.update({"execution_count": None, "outputs": []})

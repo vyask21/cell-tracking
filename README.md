@@ -6,6 +6,7 @@ centre of each cell in each frame, link each cell to itself in the next frame, a
 mark the moments when a cell divides into two.
 
 - Competition: https://www.kaggle.com/competitions/biohub-cell-tracking-during-development
+- Write-up: https://www.kaggle.com/competitions/biohub-cell-tracking-during-development/writeups/cell-tracking-lightgbm-division-classifier
 - Final placement: 98th of 4,017 teams, silver medal.
 
 ## Result
