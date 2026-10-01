@@ -1,0 +1,15 @@
+{
+  "id": "vyask21/cell-tracking-division-model-and-coordinate-head",
+  "title": "Cell tracking: division model and coordinate head",
+  "code_file": "cell_tracking_writeup.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "dataset_sources": [],
+  "competition_sources": ["biohub-cell-tracking-during-development"],
+  "kernel_sources": [],
+  "model_sources": []
+}

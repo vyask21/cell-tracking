@@ -43,7 +43,7 @@ relied on most were measured on those 19.
 
 For much of the competition the local test and the public leaderboard disagreed
 about changes to decision thresholds, so threshold changes were settled by
-submitting them. The learned division model was the exception: its estimate on the
+submitting them. The division classifier was the exception: its estimate on the
 19 held-out movies, about +0.01, came close to the private result of +0.008.
 
 ### My own pipeline first
@@ -57,12 +57,12 @@ Its code, tests and every configuration are in this repo.
 
 By mid-September a public notebook scored 0.947 and hundreds of teams had copied
 it. I used it as the base from then on and kept my changes one at a time against
-it. A later public notebook added a small learned network that shifts each detected
+it. A later public notebook added a small network that shifts each detected
 centre, and its author kept the trained weights private at first. I captured detections and their matched ground truth on training movies
 and fitted my own version. Mine scored lower on its own, but averaging my head's
 shift with the published one scored 0.956 public, above either alone.
 
-### Learned divisions
+### A division classifier
 
 The public stack decided divisions with fixed distance gates, a nearest-neighbour
 check and a veto from a second network. I ran the pipeline over 119 training
